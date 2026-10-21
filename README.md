@@ -13,4 +13,4 @@ A better Cmd-Tab and window manager for macOS, driven from the keyboard. One vie
 
 ## Next step
 
-Technical spikes in Swift (window listing, arranging, window images, the notch panel). See [section 10 of the spec](docs/SPEC.md#10-technical-risks-and-spikes).
+Technical spikes in Swift (window listing, arranging, window images, the notch panel), built and run on a MacBook with a notch. See the [M0 spike plan](docs/SPEC.md#m0-spike-plan-proposed) in section 10 of the spec.
