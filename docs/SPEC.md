@@ -1,7 +1,7 @@
 # Segue — Specification
 
 > **Segue is the final product name**, chosen for the idea of moving smoothly between working contexts. Earlier drafts used "Noren" as a working name and "Axle" for the ring-based design concept.
-> Status: **Draft 0.1** · Last updated: 2026-10-20 · Current prototype: [`prototypes/03-axle-workspaces.html`](../prototypes/03-axle-workspaces.html)
+> Status: **Draft 0.1** · Last updated: 2026-10-21 · Current prototype: [`prototypes/03-axle-workspaces.html`](../prototypes/03-axle-workspaces.html)
 >
 > Sections are marked where they record a decision the owner made (**Decided**) versus a direction proposed during prototyping that still needs confirmation (**Proposed**). See the [decision log](#15-decision-log).
 
@@ -336,6 +336,26 @@ Facts that shape the risks:
 | S5 Restoring | Launch apps with documents, folders or URLs; match windows to slots | Correct match for 90% or more of a test set |
 | S6 Panel and keys | Non-activating panel over the menu bar and full-screen apps; detect ⌥ held and released; which permission it needs | First frame within 16 ms of the hotkey; works over full-screen apps |
 
+### M0 spike plan (Proposed)
+
+The spikes run on a MacBook with a notch. They call macOS-only APIs (Accessibility, `CGWindowList`, ScreenCaptureKit, `NSPanel`, event taps), so they can't be built or measured on another OS, and the notch and permission prompts only exist on the target hardware.
+
+One Swift package under `spikes/`, with one executable per spike. Each prints its measurements and a pass or fail against the targets above.
+
+| Spike | Executable | What it does |
+|---|---|---|
+| S1 | `s1-windows` | Lists windows with `CGWindowListCopyWindowInfo` and Accessibility, matches them by window ID, times the warm listing, and focuses a chosen window, including on another Space |
+| S2 | `s2-arrange` | Applies frames to 3–6 windows across Safari, Chrome, VS Code, Xcode, Terminal and Finder; reports time per window, success rate and whether each window ends where it was set |
+| S4 | `s4-capture` | Times single-frame `SCScreenshotManager` captures at preview size, measures memory for about 20 cached images, and tries minimized, hidden and other-Space windows |
+| S6 | `s6-panel` | Shows a non-activating panel over the menu bar and full-screen apps, times hotkey to first frame, detects ⌥ held and released with an event tap, and records which permission macOS asks for |
+
+Assumptions to confirm:
+
+- macOS 14 is the minimum for the spikes, because `SCScreenshotManager` needs it. This doesn't settle [Q1](#14-open-questions) for the product.
+- S1 may use the private `_AXUIElementGetWindow` call to match Accessibility windows to window IDs, as AltTab does. Whether the product needs it is part of what S1 finds out.
+
+Before starting on the Mac: install Xcode (or Command Line Tools with Swift 6), note the macOS version and MacBook model, and grant Accessibility and Screen Recording to the terminal the spikes run from when macOS asks. The spikes move, focus and capture real windows. They write nothing to disk and use no network.
+
 ## 11. Milestones
 
 | Milestone | Scope |
@@ -405,6 +425,7 @@ Based on product pages and general knowledge as of October 2026. Verify before u
 | 2026-10-13 | Name shortlist: Fusuma and Noren | Superseded by final name decision on 2026-10-20 |
 | 2026-10-13 | Noren becomes the working name (repository: `noren`); final name still open | Superseded by final name decision on 2026-10-20 |
 | 2026-10-20 | Segue chosen as the final product name: moving smoothly between working contexts. Naming question Q2 resolved. | Decided |
+| 2026-10-21 | Technical spikes are built and measured on a MacBook with a notch, not on the Linux machine; plan recorded in [§10](#m0-spike-plan-proposed) | Decided |
 
 ## 16. Prototypes
 
