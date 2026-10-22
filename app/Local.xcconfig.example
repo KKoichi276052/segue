@@ -1,0 +1,6 @@
+// Copy to Local.xcconfig (ignored by git) to sign with your Apple Development certificate,
+// so permissions survive rebuilds. Find the team ID in Xcode › Settings › Accounts.
+
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_IDENTITY = Apple Development
+DEVELOPMENT_TEAM = YOURTEAMID

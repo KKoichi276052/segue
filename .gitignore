@@ -8,3 +8,7 @@ DerivedData/
 .swiftpm/
 *.xcuserstate
 xcuserdata/
+
+# App (app/project.yml generates the Xcode project)
+app/Segue.xcodeproj/
+app/Local.xcconfig
