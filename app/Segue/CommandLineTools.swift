@@ -41,6 +41,9 @@ enum CommandLineTools {
             watchWindows(seconds: seconds)
             return 0
         }
+        if let i = args.firstIndex(of: "--focus"), i + 1 < args.count, let id = WindowID(args[i + 1]) {
+            return focus(id)
+        }
         if args.contains("--help") {
             print("""
             Segue \(SegueVersion.string)
@@ -50,6 +53,8 @@ enum CommandLineTools {
               --dump-windows   print the window list once, with build times
               --watch-windows <s>  keep the live list for s seconds (default 30), print
                                each change, then the CPU time used
+              --focus <id>     focus one window (ids from --dump-windows) and time it.
+                               Moves focus and may switch Space.
               --help           this help
             """)
             return 0
@@ -90,5 +95,37 @@ extension CommandLineTools {
         let cpu = Double(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) + Double(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1e6
         print(WindowReport.table(inventory.snapshot.windows, focusedID: inventory.snapshot.focusedID))
         print("\(inventory.snapshot.refreshCount) refreshes; CPU \(fmt(cpu, 3)) s over \(Int(seconds)) s (\(fmt(cpu / seconds * 100, 3))%)")
+    }
+}
+
+extension CommandLineTools {
+    /// Focuses one window the way the switcher does and confirms it, as spike S1 did.
+    @MainActor
+    static func focus(_ id: WindowID) -> Int32 {
+        _ = NSApplication.shared
+        let inventory = WindowInventory()
+        inventory.start()
+        let deadline = Date().addingTimeInterval(3)
+        while inventory.snapshot.windows.isEmpty && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        guard let window = inventory.snapshot.windows.first(where: { $0.id == id }) else {
+            print("No window \(id). Run --dump-windows for ids.")
+            return 1
+        }
+        let focuser = WindowFocuser(inventory: inventory)
+        var outcome: WindowFocuser.Outcome?
+        let start = ContinuousClock.now
+        focuser.focus(window) { outcome = $0 }
+        while outcome == nil { RunLoop.main.run(until: Date().addingTimeInterval(0.005)) }
+        let confirmed = focuser.confirmFocus(window)
+        let total = (ContinuousClock.now - start).milliseconds
+        let label = "\(window.appName) (\(window.kind.rawValue)) via \(outcome!.method.rawValue)"
+        if confirmed != nil {
+            print("[ok] \(id) \(label): request \(fmt(outcome!.requestMs)) ms, focus confirmed \(fmt(total)) ms after the request")
+            return 0
+        }
+        print("[FAIL] \(id) \(label): not the focused window within 1.5 s (request \(fmt(outcome!.requestMs)) ms)")
+        return 1
     }
 }
