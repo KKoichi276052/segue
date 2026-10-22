@@ -11,6 +11,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let privateAPI = PrivateAPI.availability
     private lazy var report = ReportWindow()
     private let inventory = WindowInventory()
+    private lazy var switcher = SwitcherCoordinator(inventory: inventory)
+    /// `--no-input` runs without the hotkey and the event tap, for idle measurements.
+    private let inputEnabled = !CommandLine.arguments.contains("--no-input")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.app.info("Segue \(SegueVersion.string, privacy: .public) launched; \(PermissionsCoordinator.describe(self.permissions), privacy: .public)")
@@ -22,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         refreshMenu()
         inventory.start()
+        switcher.start(inputEnabled: inputEnabled)
         if PermissionsFlow.step(for: permissions, screenRecordingSkipped: Settings.screenRecordingSkipped) != .done {
             showPermissions()
         }
@@ -35,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Log.permissions.info("changed: \(PermissionsCoordinator.describe(status), privacy: .public)")
             permissions = status
             inventory.permissionsChanged()
+            if inputEnabled { switcher.installTapIfPossible() }
         }
         refreshMenu()
     }
@@ -59,11 +64,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var state = MenuState()
         state.warnings = PermissionsFlow.warnings(for: permissions, macOSMajor: PermissionsCoordinator.macOSMajor)
         state.notes = privateAPI.fallbackNotes
+        state.paused = switcher.paused
+        switch switcher.hotkey.status {
+        case .registered(let spec): state.notes.append("\(spec.description) opens the switcher · hold ⌥ Tab to switch")
+        case .failed(let spec, _): state.warnings.append("\(spec.description) is taken by another app. Set TapHotkey with defaults write.")
+        case .notRegistered: if inputEnabled && !switcher.paused { state.warnings.append("TapHotkey “\(Settings.tapHotkeyText)” isn't a valid hotkey") }
+        }
+        if inputEnabled && permissions.accessibility && !switcher.holdMonitor.isInstalled {
+            state.warnings.append("Hold mode is off: the event tap couldn't be created")
+        }
         menuBar.update(state)
     }
 
     private func mainMenuItems() -> [MenuBarController.Item] {
-        var items: [MenuBarController.Item] = []
+        var items: [MenuBarController.Item] = [
+            .init("Pause Segue", checked: switcher.paused) { [weak self] in
+                guard let self else { return }
+                switcher.paused.toggle()
+                refreshMenu()
+            },
+        ]
         if PermissionsFlow.step(for: permissions, screenRecordingSkipped: false) != .done {
             items.append(.init("Permissions…") { [weak self] in self?.showPermissions() })
         }
@@ -78,6 +98,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let text = WindowReport.table(snapshot.windows, focusedID: snapshot.focusedID)
                     + "\nlast refresh \(fmt(snapshot.refreshMs, 2)) ms; \(snapshot.refreshCount) refreshes since launch"
                 report.show(title: "Windows", text: text)
+            },
+            .init("Timing summary") { [weak self] in
+                guard let self else { return }
+                report.show(title: "Hotkey to first frame", text: switcher.timings.summary()
+                    + "\n\nevent tap: \(switcher.holdMonitor.isInstalled ? "installed" : "not installed"), disabled by macOS \(switcher.holdMonitor.disabledCount) times"
+                    + "\nresident memory \(residentMemory() / 1_048_576) MB")
+            },
+            .init("Log raw key events", checked: switcher.keyLogEnabled) { [weak self] in
+                self?.switcher.keyLogEnabled.toggle()
             },
             .init("Private API self-check") { [weak self] in
                 let text = PrivateAPI.selfCheck().map { "[\($0.ok ? "ok" : "MISSING")] \($0.name): \($0.detail)" }.joined(separator: "\n")

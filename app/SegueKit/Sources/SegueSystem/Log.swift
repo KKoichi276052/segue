@@ -1,7 +1,7 @@
 import os
 
-/// Loggers and the signposter used across Segue. View with
-/// `log stream --predicate 'subsystem == "io.github.kkoichi276052.segue"'`.
+/// Loggers and the signposter used across Segue. View with (zsh has its own `log`, so use the full path)
+/// `/usr/bin/log stream --info --predicate 'subsystem == "io.github.kkoichi276052.segue"'`.
 public enum Log {
     public static let subsystem = "io.github.kkoichi276052.segue"
     public static let app = Logger(subsystem: subsystem, category: "app")
