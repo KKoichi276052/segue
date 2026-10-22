@@ -1,7 +1,7 @@
 # Segue — Specification
 
 > **Segue is the final product name**, chosen for the idea of moving smoothly between working contexts. Earlier drafts used "Noren" as a working name and "Axle" for the ring-based design concept.
-> Status: **Draft 0.1** · Last updated: 2026-10-21 · Current prototype: [`prototypes/03-axle-workspaces.html`](../prototypes/03-axle-workspaces.html)
+> Status: **Draft 0.1** · Last updated: 2026-10-22 · Current prototype: [`prototypes/03-axle-workspaces.html`](../prototypes/03-axle-workspaces.html)
 >
 > Sections are marked where they record a decision the owner made (**Decided**) versus a direction proposed during prototyping that still needs confirmation (**Proposed**). See the [decision log](#15-decision-log).
 
@@ -75,11 +75,15 @@ Primary users are keyboard-heavy Mac users (developers, designers, writers) who:
 |---|---|---|
 | ⌥ Space | Tap mode: open the ring at the active workspace. | Decided |
 | Hold ⌥, press Tab | Hold mode: cycle recently used windows across all workspaces. Letting go of ⌥ switches. ⇧ Tab goes back. | Decided |
-| Hold ⌥, press ` | Cycle only the current app's windows. | Proposed |
+| While holding ⌥ | Arrow keys move the selection. esc cancels without switching. Typing a letter keeps the interface open and starts a search ([§6.5](#65-search-proposed)). | Decided |
+| Hold ⌥, press ` | Cycle only the current app's windows. | Proposed; not in M1 |
 | Direct hotkeys | For example ⌃⌥1–9 brings back workspace N without opening the interface. Optional per-app hotkeys replace "pinning". | Decided (pins replaced by hotkeys); key choice proposed |
 
 - All hotkeys are configurable. ⌥ Space is already used by some apps, so onboarding must detect and explain conflicts ([Q6](#14-open-questions)).
-- Hold mode has a show delay (0–250 ms). A quick ⌥ Tab tap switches to the previous window without flashing the interface. The default is to be tuned; the prototype suggests about 100 ms.
+  - Registering a hotkey (Carbon `RegisterEventHotKey`) only fails when another app registered the same keys the same way. Apps that catch keys with event taps can't be detected.
+  - In M1, a hotkey that fails to register shows in the menu bar item, and keys are changed with `defaults write`. Explaining conflicts in onboarding comes in M4.
+- **Key remappers.** Tools like kanata and Karabiner can change what arrives. With a tap-hold key, for example Space as Shift when held, the tap reaches macOS only on release, and holding it past its timeout adds Shift to other keys. Arrows give hold mode a way to move back that doesn't depend on Shift.
+- Hold mode has a show delay (0–250 ms). A quick ⌥ Tab tap switches to the previous window without flashing the interface. The default is to be tuned; the prototype suggests about 100 ms. When the interface does show, it fades in over about 100 ms and hides at once, so a release just after the delay doesn't read as a flash.
 
 ### 6.2 The ring
 
@@ -130,7 +134,8 @@ Primary users are keyboard-heavy Mac users (developers, designers, writers) who:
 
 ### 6.5 Search (Proposed)
 
-- **Starting.** Typing any letter while the ring is open starts a search. There's no permanent search field; the key hints say "type to search".
+- **Starting.** Typing any letter while the ring is open starts a search. There's no permanent search field; the key hints say "type to search". Typing a letter during a hold also starts a search, and the interface stays open after ⌥ is released (Decided).
+- **Input (Decided).** Search uses a real text field, not keys read through the event tap, so input methods work, for example Japanese.
 - **Where it appears.** The ring tucks back into the notch, and the selected island stretches into a search bar directly under the notch. The bar is joined to the notch above and to the results below. The notch itself can't show anything because it's the camera cutout with no pixels, so the space right below it is the closest place that can.
 - **What it searches.** Window titles, app names and workspace names. The top 6 results show as a grid in the preview, and workspace results show their layout map.
 - **Keys.** ◀ ▶ choose a result, return goes there, esc clears the search and brings the ring back, and a second esc closes.
@@ -165,6 +170,9 @@ Two modes:
 |---|---|---|
 | Anywhere | ⌥ Space | Open the ring (tap mode) |
 | Anywhere | Hold ⌥ + Tab / ⇧ Tab | Recent windows across workspaces; let go to switch |
+| Hold | ◀ ▶ ▲ ▼ | Move the selection |
+| Hold | esc | Cancel without switching |
+| Hold | Any letter | Search; stays open after ⌥ is released |
 | Anywhere | Hold ⌥ + ` | Current app's windows |
 | Ring | ◀ ▶ | Turn the ring |
 | Ring | 1–9 | Jump to workspace N |
@@ -208,12 +216,13 @@ Two modes:
 
 | Permission | Needed for | Required? |
 |---|---|---|
-| Accessibility | Listing, focusing, moving and resizing windows. Possibly also the system-wide keyboard listener for hold mode. | Required |
-| Input Monitoring | Possibly needed for the hold-mode keyboard listener (spike S6 confirms which permission applies). | To be confirmed |
-| Screen Recording | Window images for previews and the fly-in animation. Without it the app shows icon-and-title cards. | Optional, recommended (Decided) |
+| Device Control and Data Access (macOS 27); Accessibility (macOS 26) | Listing, focusing, moving and resizing windows, and the hold-mode event tap. On macOS 27, granting this one pane was enough for both the Accessibility and the Input Monitoring checks in S6. That was observed with Terminal as the host and is re-checked for the app in M1. | Required |
+| Input Monitoring (macOS 26) | Possibly needed separately for the event tap on macOS 26. Checked in a macOS 26 VM before the beta. | To be confirmed on 26 |
+| Screen Recording | Window images for previews and the fly-in animation. Also the titles of windows on other Spaces: those come from the Window Server list, which hides titles without this permission. Without it the app shows icon-and-title cards. | Optional, recommended (Decided) |
 
 - Explain each permission before macOS asks for it.
 - Recover gracefully when a permission is revoked.
+- Permissions are tied to the app's code signature, so even development builds need a stable signing identity. Ad-hoc-signed builds lose their permissions on every rebuild.
 
 ## 7. Requirements
 
@@ -260,12 +269,12 @@ Two modes:
 - No network access in v1 apart from update checks.
 - Window images stay in memory. They are never written to disk or sent anywhere.
 - No analytics by default.
-- Signed with a Developer ID, notarized, and built with the hardened runtime.
+- Signed and built with the hardened runtime. Development builds use a free Apple Development certificate (Decided). Whether releases use a paid Developer ID with notarization is open ([Q11](#14-open-questions)).
 
 ### Compatibility
 
 - Primary target: Apple silicon MacBooks with a notch. Any Mac works with the virtual notch.
-- Minimum macOS version to be decided ([Q1](#14-open-questions)).
+- **Minimum macOS 26 (Decided).** Development and M1 testing are on macOS 27. macOS 26 is checked in a VM before the beta (M5).
 
 ## 9. Architecture (proposed)
 
@@ -274,19 +283,70 @@ Two modes:
 
 ### Components
 
-| Component | Responsibility |
-|---|---|
-| `HotkeyService` | Register global hotkeys (Carbon `RegisterEventHotKey`) |
-| `HoldMonitor` | Detect ⌥ held and released for hold mode (event tap) |
-| `WindowInventory` | Keep the list of windows current: `NSWorkspace` notifications, `AXObserver`, `CGWindowListCopyWindowInfo` |
-| `WindowController` | Focus, raise, move, resize, close and hide windows through Accessibility, off the main thread |
-| `SnapshotService` | Capture window images with ScreenCaptureKit; small least-recently-used cache |
-| `WorkspaceStore` | Load and save workspaces (JSON in `~/Library/Application Support/<App>/`) |
-| `Restorer` | Bring a workspace back: match windows to slots, launch missing apps, apply frames |
-| `OverlayPanel` | The notch panel and its views: ring, preview, search |
-| `SpringAnimator` | Interruptible spring motion shared by all views |
-| `PermissionsCoordinator` | Onboarding, permission status, fallbacks |
-| `Settings` | User defaults and the settings window |
+| Component | Responsibility | Module |
+|---|---|---|
+| `HotkeyService` | Register global hotkeys (Carbon `RegisterEventHotKey`) | SegueSystem |
+| `HoldMonitor` | Detect ⌥ held and released for hold mode (event tap); optional raw key-event log | SegueSystem |
+| `SwitcherState` | The hold, tap and search state machine: show delay, quick switch, selection, release, cancel | SegueCore |
+| `WindowInventory` | Keep the list of windows current: `NSWorkspace` notifications, `AXObserver`, `CGWindowListCopyWindowInfo`; recently-used order | SegueSystem, with merging and order in SegueCore |
+| `PrivateAPI` | SkyLight focus and `_AXUIElementGetWindow`, resolved at run time, with a launch self-check and fallbacks | SegueSystem |
+| `WindowController` | Focus, raise, move, resize, close and hide windows through Accessibility, off the main thread. M1 has only the focus part (`WindowFocuser`). | SegueSystem |
+| `SnapshotService` | Capture window images with ScreenCaptureKit; small least-recently-used cache | SegueSystem, with the cache policy in SegueCore |
+| `SearchRanker` | Match and rank windows (and later workspaces) for a query | SegueCore |
+| `WorkspaceStore` | Load and save workspaces (JSON in `~/Library/Application Support/<App>/`) | SegueSystem (M2) |
+| `Restorer` | Bring a workspace back: match windows to slots, launch missing apps, apply frames | SegueSystem (M2) |
+| `OverlayPanel` | The notch panel and its views: ring, preview, search | SegueUI |
+| `SpringAnimator` | Interruptible spring motion shared by all views | SegueUI (M4) |
+| `PermissionsCoordinator` | Onboarding, permission status, fallbacks | SegueSystem, with its window in SegueUI |
+| `Settings` | User defaults and the settings window. M1 has only the defaults. | App target |
+
+### Private APIs (Decided)
+
+The product uses two private calls that S1 relies on, as AltTab does:
+
+- **`_SLPSSetFrontProcessWithOptions` and `SLPSPostEventRecordTo`** (SkyLight) focus a window on another Space.
+- **`_AXUIElementGetWindow`** maps an Accessibility window to its window ID.
+
+Notarization doesn't check for private APIs; App Store review does, and the App Store is already ruled out. The risk is a macOS update breaking them, so:
+
+- Both live in one small `PrivateAPI` module. SkyLight is loaded with `dlopen`, and its symbols are resolved at run time.
+- A self-check at launch logs which calls work. The menu bar item shows when the app is running on fallbacks.
+- Without SkyLight, windows on other Spaces are still listed, and choosing one activates its app.
+- Without `_AXUIElementGetWindow`, windows are matched by process, title and frame.
+- The remote-token lookup (`_AXUIElementCreateWithRemoteToken`) is not used: S1 found it slow and it missed some apps' windows.
+
+### Project structure (Decided)
+
+```
+app/
+  project.yml              XcodeGen spec; the generated Segue.xcodeproj is ignored by git
+  Segue/                   App target: entry point and wiring, Info.plist (menu bar only), entitlements, assets
+  SegueKit/                Local Swift package
+    Sources/SegueCore/     Pure logic, no AppKit
+    Sources/SegueSystem/   macOS integration
+    Sources/SegueUI/       Panel and views
+    Tests/SegueCoreTests/
+spikes/                    The M0 record: frozen, not a dependency of the app
+```
+
+- **SegueCore** holds the logic that can be tested without macOS services: merging the window lists, recently-used order, `SwitcherState`, `SearchRanker` and the cache policy. `swift test` runs its tests headless in seconds.
+- **SegueSystem** holds everything that talks to macOS: Accessibility, `CGWindowList`, `PrivateAPI`, ScreenCaptureKit, the event tap, hotkeys and permissions.
+- **SegueUI** holds the panel, the switcher view and the permissions window. The app target wires the three together.
+- XcodeGen keeps the project definition as a reviewable text file. Run `xcodegen generate` after pulling.
+
+**From the spikes.** Code is copied and adapted, never linked, so changes to the app can't alter the M0 measurements.
+
+| From | To | Notes |
+|---|---|---|
+| `SpikeKit/Windows.swift`: `_AXUIElementGetWindow`, `cgWindows()`, the `AX` helpers, the messaging timeout | `PrivateAPI`, `WindowInventory` | The `AX` setters and `visibleFrameInAXCoordinates` wait for M3 |
+| `SpikeKit/Focus.swift`: the SkyLight front-process call and the make-key event records | `PrivateAPI`, `WindowFocuser` | `OffSpace.element` (remote tokens) is dropped |
+| `SpikeKit/Permissions.swift` | `PermissionsCoordinator` | |
+| `SpikeKit/Measure.swift`: `measure`, `Stats`, `residentMemory` | SegueCore, for the debug timing summary | |
+| `s1-windows`: the focus routine | `WindowFocuser` | |
+| `s6-panel`: panel level and collection behavior, `notchRect`, the Carbon hotkey, the event tap and its re-enable, the hold logic | `OverlayPanel`, `HotkeyService`, `HoldMonitor`, `SwitcherState` | The hold logic is rewritten as a testable state machine |
+| `s4-capture`: the capture setup, the blank-image check, the size filter | `SnapshotService` | |
+
+These stay in the spikes: `Report`, `Arguments`, `columns`, and `s2-arrange`'s frame setting, which comes back in M3.
 
 ### Data model (sketch)
 
@@ -351,7 +411,7 @@ One Swift package under `spikes/`, with one executable per spike. Each prints it
 
 Assumptions to confirm:
 
-- macOS 14 is the minimum for the spikes, because `SCScreenshotManager` needs it. This doesn't settle [Q1](#14-open-questions) for the product.
+- macOS 14 is the minimum for the spikes, because `SCScreenshotManager` needs it. The product's minimum is macOS 26 (decided 2026-10-22).
 - S1 may use the private `_AXUIElementGetWindow` call to match Accessibility windows to window IDs, as AltTab does. Whether the product needs it is part of what S1 finds out.
 
 **Build status and results (2026-10-22).** The four executables are in [`spikes/`](../spikes/) and build with Xcode 27.1 (Swift 6.4) on macOS 27.0.1 (26A434), MacBook Pro Mac14,9. Built-in display: notch 185 × 32 pt, 120 Hz. Run from T3 Code with Accessibility, Screen Recording and Input Monitoring granted. The S1, S2 and S4 runs had up to 89 windows across several Spaces, minimized windows and a hidden app. S6 was run by hand.
@@ -369,13 +429,80 @@ Before starting on the Mac: install Xcode (or Command Line Tools with Swift 6), 
 
 | Milestone | Scope |
 |---|---|
-| M0 | Spikes S1, S2, S4, S6 (S3 and S5 can follow) |
-| M1 | Window switcher: hold mode across all windows, search, previews, no workspaces yet. The owner uses it daily. |
+| M0 | Spikes S1, S2, S4, S6 (S3 and S5 can follow). Done 2026-10-22; results in [§10](#m0-spike-plan-proposed). |
+| M1 | Window switcher: hold mode across all windows, search, previews, no workspaces yet. The owner uses it daily. See the [M1 plan](#m1-plan-decided). |
 | M2 | Workspaces: ring, preview, save and bring back, launch missing apps |
 | M3 | Window actions: snap, send, close; loose windows |
 | M4 | Polish: motion, side glances, peek islands, virtual notch, settings, onboarding |
 | M5 | Private beta with keyboard-launcher users and a one-week usage study |
 | Later | "Hide everything else" mode; search for apps that aren't open; workspaces across displays |
+
+### M1 plan (Decided)
+
+**Goal.** A window switcher the owner uses every day instead of Cmd-Tab: hold mode across all windows, search and previews. No workspaces yet.
+
+**Starting point from M0.**
+
+- Listing windows, focusing every kind of window, the panel over full-screen apps, detecting ⌥ held and released, and capturing window images all work on the target Mac.
+- **The window list must be a cache.** The full listing takes 29.5 ms for 89 windows, too slow to build when the hotkey is pressed. It's built at launch and kept current by notifications.
+- **Previews come from a cache too.** A capture costs about 34 ms whatever its size, so images are refreshed in the background.
+- **The first show needs pre-warming.** It took 44–66 ms against a 16 ms target.
+- **Other Spaces are a special case.** Windows there have no Accessibility element. Focusing them needs SkyLight, and their titles come from the Window Server list, which needs Screen Recording.
+
+**Scope.**
+
+| Area | In M1 |
+|---|---|
+| Hold mode | ⌥ Tab and ⌥ ⇧ Tab across all windows in recently-used order, including minimized, hidden-app and other-Space windows. Arrows move the selection while ⌥ is held. Releasing switches; esc cancels. A release before the show delay (100 ms, adjustable) switches to the previous window without showing anything. |
+| Tap mode | ⌥ Space opens the same switcher and keeps it open. There's no ring until M2. return focuses; esc clears the search, then closes. |
+| Search | Typing in tap mode, or typing a letter during a hold, filters by window title and app name. It uses a real text field, so input methods work. |
+| View (Proposed) | A grid of window cards hanging from the notch, or from a virtual notch on other displays, on the display with the focused window. Each card shows an image, the app icon and the title. All windows show at once when they fit. The grid fades in over about 100 ms and hides at once. Clicking a card focuses it; clicking outside closes. |
+| Previews | Cached images show at once and are refreshed in the background, selected card first. Cards show the app icon and title while there's no image, or without Screen Recording. Images stay in memory only, in a least-recently-used cache capped at 60 MB. |
+| Permissions | A small first-launch window asks for Device Control and Data Access (Accessibility on macOS 26), then optionally Screen Recording. Missing or revoked permissions show in the menu bar item. |
+| App shell | Menu bar item only, with no Dock icon: status, Pause, a Debug menu and Quit. Launch at login. Hotkeys and the show delay are changed with `defaults write`. |
+| Diagnostics | Debug menu: dump windows, private-API self-check, raw key-event log, timing summary (hotkey to first frame). Logs go to `os.Logger`; timings use signposts. |
+
+**Not in M1.**
+
+- Workspaces, the ring and islands, and bringing workspaces back (M2).
+- Window actions: snap, send and close (M3).
+- The same-app ⌥ ` variant and direct hotkeys.
+- A settings window or hotkey recorder.
+- From M4: polished onboarding, conflict explanations, spring motion, the metaball effect, side glances, peek islands and the fly-in animation.
+- Sparkle updates, Developer ID and notarization.
+- Testing on macOS 26. The deployment target is 26, but M1 is tested on 27 only.
+- Spikes S3 and S5.
+
+**How steps are checked.**
+
+- The SegueCore logic has unit tests that run with `swift test`: list merging, recently-used order, `SwitcherState`, `SearchRanker` and the cache policy.
+- Anything that touches macOS is checked on the MacBook through the Debug menu and signpost timings, against a checklist in the step's pull request. There are no UI tests.
+- Each step is one pull request. It builds, passes its tests and leaves the app runnable.
+
+**Build order.**
+
+| Step | What | Checked by |
+|---|---|---|
+| 1 Skeleton | `app/project.yml`; the `SegueKit` package with its three modules; a menu-bar-only app; free Apple Development signing; `.gitignore` for the generated project. The bundle identifier is chosen here, once, because permissions are tied to it. | `xcodegen generate` and `xcodebuild` build cleanly; `swift test` passes; no Dock icon. A permission granted before a rebuild is still granted after it. |
+| 2 Permissions | `PermissionsCoordinator` and the first-launch window. Permission status is checked once a second, but only while that window is open. | After `tccutil reset All <bundle id>`, Segue goes from first launch to fully granted without a terminal. Record which System Settings panes list Segue on macOS 27, and whether the event tap works without a relaunch. A revoked permission shows in the menu bar at the next show. |
+| 3 Private APIs | `PrivateAPI`: SkyLight focus and `_AXUIElementGetWindow`, resolved at run time, with the launch self-check and fallbacks. | The self-check reports both calls available on 27.0.1. A debug default that pretends each is missing exercises its fallback. |
+| 4 Inventory and recency | `WindowInventory`, off the main thread with a 0.25 s messaging timeout, kept current by `NSWorkspace` notifications and one `AXObserver` per app. Recently-used order comes from focus changes, starting from the Window Server's front-to-back order. Helper windows are filtered out. | Unit tests for merging, filtering and order. The dump matches `s1-windows`'s user windows on the same desktop. Opening, closing, renaming, minimizing and moving a window to another Space show up within 1 s. Reading the list on the main thread takes under 1 ms. A stopped app (`kill -STOP`) delays nothing by more than 0.25 s. CPU stays at 0.0% over 10 idle minutes. |
+| 5 Focus | `WindowFocuser`: Accessibility on the current Space, SkyLight elsewhere, unminimizing off the main thread. | Debug focus for each S1 case: current Space, other Space, hidden app and minimized. Focus is confirmed within 100 ms, or 400 ms for minimized windows. No main-thread hang over 16 ms. |
+| 6 Panel and keys | The pre-warmed `OverlayPanel` at the notch or a virtual notch; the Carbon ⌥ Space hotkey; the event tap for hold mode, which swallows keys only during a hold or while the switcher is open; `SwitcherState`; Pause in the menu. The content is a plain list of titles. | Unit tests for the state machine: show delay, quick switch, ⇧ Tab, arrows, esc, release, and a letter starting a search. A timing summary over 20 ⌥ Space presses and 20 holds, including the first after launch and the first after connecting the external display: the median and the first show are within 16 ms. If not, try the always-on transparent panel and record its idle cost. A quick ⌥ Tab never shows a frame. The switcher works over a full-screen app. With Segue stopped (`kill -STOP`), typing in other apps recovers within a few seconds. The raw key log shows what kanata sends when a stray Shift appears; the finding goes in [§10](#m0-spike-plan-proposed). **Daily use starts here.** |
+| 7 Switcher view | The card grid with icon-and-title cards, selection, fade-in, click to focus, and VoiceOver announcing the selection. | 89 windows stay readable. Moving the selection keeps every frame within 16 ms. Japanese titles render. A release at 106–155 ms no longer reads as a flash (the owner's call). |
+| 8 Previews | `SnapshotService` and its cache. It refreshes on show, selected card first, one capture at a time, and captures the window you just left after a switch. | Show timings are unchanged from step 7. 20 cards refresh within about 1 s. With 20 or more images, resident memory stays within 60 MB of the step-7 baseline. Nothing is captured while the switcher is hidden, except after a switch, and idle CPU stays about 0%. With Screen Recording off, cards still work. Record whether macOS 27 shows a recording indicator. |
+| 9 Search | The text field in tap mode, and a letter during a hold switching to search. `SearchRanker` ignores case and full-width versus half-width forms, and ranks word-prefix matches first, then substring, then scattered-letter matches, with ties going to the most recently used. Titles of windows on other Spaces come from the Window Server list, or else from the last title seen through Accessibility. | Ranking unit tests, including Japanese and full-width text. Typing Japanese through the input method finds a Japanese-titled window. Each keystroke updates the results within 16 ms for 100 windows. esc leaves the previously active app in front, unchanged. |
+| 10 Daily-use hardening | Launch at login (`SMAppService`); connecting and disconnecting displays; apps launching or quitting during a hold; Space switches; sleep and wake; keys changed with `defaults`. | A checklist covering each of these passes on the MacBook, followed by a week of daily use with issues logged. |
+
+**Done when.**
+
+- The owner switches with Segue instead of Cmd-Tab for a week, with no crash and no lost keyboard input.
+- On the MacBook, every target is met:
+  - hotkey to first frame within 16 ms median, including the first show (or a recorded exception);
+  - about 0% CPU while hidden;
+  - 100 MB resident or less with previews;
+  - focus works for all four kinds of window.
+- Findings are recorded in [§10](#m0-spike-plan-proposed) and decisions in [§15](#15-decision-log).
 
 ## 12. Success measures
 
@@ -403,15 +530,15 @@ Based on product pages and general knowledge as of October 2026. Verify before u
 
 | ID | Question |
 |---|---|
-| Q1 | What is the minimum macOS version? |
 | Q3 | When you move a window yourself, outside the app, should its workspace update automatically, or only when you save? |
 | Q4 | Workspaces across several displays: one layout per display, or one workspace spanning displays? |
 | Q5 | Does a newly opened window join the active workspace automatically? |
-| Q6 | What are the default hotkeys, and how are conflicts handled (⌥ Space is taken by some apps)? |
+| Q6 | What are the default direct hotkeys (⌃⌥1–9 is proposed), and how does onboarding explain hotkey conflicts (M4)? The hold and tap keys and M1's conflict handling are decided ([§15](#15-decision-log)). |
 | Q7 | Should search also find apps that aren't open (launcher behavior)? |
 | Q8 | In "hide everything else" mode, how does it coexist with macOS Spaces and full-screen apps? |
 | Q9 | What is the business model and price? |
 | Q10 | Final default for the preview: biggest, thin glances (current proposal) or wide glances? |
+| Q11 | How are releases signed: a paid Developer ID with notarization (about US$99 a year; no Gatekeeper warning), or an unnotarized build signed with a stable self-made certificate (free, but users must choose "Open Anyway" in System Settings on first launch)? Ad-hoc signing is ruled out, because users would have to grant permissions again after every update. Decide before M5. |
 
 ## 15. Decision log
 
@@ -436,6 +563,17 @@ Based on product pages and general knowledge as of October 2026. Verify before u
 | 2026-10-20 | Segue chosen as the final product name: moving smoothly between working contexts. Naming question Q2 resolved. | Decided |
 | 2026-10-21 | Technical spikes are built and measured on a MacBook with a notch, not on the Linux machine; plan recorded in [§10](#m0-spike-plan-proposed) | Decided |
 | 2026-10-22 | Window previews show the last cached image immediately and refresh it in the background, because a single ScreenCaptureKit capture takes about 34 ms whatever its size ([S4](#m0-spike-plan-proposed)) | Decided |
+| 2026-10-22 | Minimum macOS 26. Built and tested on 27; 26 checked in a VM before M5. Q1 resolved. | Decided |
+| 2026-10-22 | Hold mode: ⌥ Tab forward, ⌥ ⇧ Tab back, arrows move while ⌥ is held, esc cancels. M1 logs raw key events to diagnose remappers: kanata adds Shift when Space is held for 150 ms or more. | Decided |
+| 2026-10-22 | Search in M1: ⌥ Space opens the switcher and keeps it open; typing a letter during a hold also starts a search. Search uses a real text field so input methods work. | Decided |
+| 2026-10-22 | Hotkey conflicts in M1: a failed registration shows in the menu bar, and keys are changed with `defaults write`; no settings window until M4. The same-app ⌥ ` variant waits until after M1. Q6 narrowed to direct hotkeys and onboarding. | Decided |
+| 2026-10-22 | Private APIs accepted: SkyLight focus and `_AXUIElementGetWindow`, isolated in one module, resolved at run time, with a launch self-check and public fallbacks. The remote-token lookup is dropped. See [§9](#private-apis-decided). | Decided |
+| 2026-10-22 | Slow first show: pre-warm the panel at launch and on display changes. If the first show still misses 16 ms, keep the panel on screen but transparent, and measure the idle cost. The panel fades in over about 100 ms and hides at once; the show delay is adjustable. | Decided |
+| 2026-10-22 | Permissions in M1: a small first-launch window asks for Device Control and Data Access, then optionally Screen Recording, with no relaunch unless macOS requires one. Revoked permissions show in the menu bar. Polished onboarding stays in M4. | Decided |
+| 2026-10-22 | Project structure: an XcodeGen `project.yml`, plus a local `SegueKit` package with SegueCore, SegueSystem and SegueUI. Spike code is copied, not linked; `spikes/` stays as the M0 record. See [§9](#project-structure-decided). | Decided |
+| 2026-10-22 | Development builds are signed with a free Apple ID "Apple Development" certificate. Whether to pay for the Developer Program is deferred to before M5 ([Q11](#14-open-questions)). | Decided |
+| 2026-10-22 | M1 plan recorded in [§11](#m1-plan-decided): scope, non-goals, ten build steps and how each is checked | Decided |
+| 2026-10-22 | M1 view: a grid of window cards under the notch, with all windows at once when they fit | Proposed |
 
 ## 16. Prototypes
 

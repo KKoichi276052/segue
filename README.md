@@ -2,7 +2,7 @@
 
 A better Cmd-Tab and window manager for macOS, driven from the keyboard. One view shows your workspaces (saved window layouts) and the windows inside them. You can get to any of them in a few keystrokes, and snap, send or close windows from the same view. The interface appears at the MacBook notch.
 
-**Status:** specification, browser prototypes and M0 spike code and results. No app code yet.
+**Status:** specification, browser prototypes, M0 spike code and results, and the M1 plan. No app code yet.
 
 ## Contents
 
@@ -14,4 +14,4 @@ A better Cmd-Tab and window manager for macOS, driven from the keyboard. One vie
 
 ## Next step
 
-Review the [M0 spike results](docs/SPEC.md#m0-spike-plan-proposed) in section 10 of the spec and decide what goes into M1. See [`spikes/README.md`](spikes/README.md) for how to run the spikes.
+Build M1, the window switcher, following the [M1 plan](docs/SPEC.md#m1-plan-decided) in section 11 of the spec, starting with step 1 (the project skeleton). The [M0 spike results](docs/SPEC.md#m0-spike-plan-proposed) are in section 10; see [`spikes/README.md`](spikes/README.md) for how to run the spikes.
