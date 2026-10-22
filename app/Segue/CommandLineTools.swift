@@ -1,6 +1,8 @@
 import AppKit
 import SegueCore
 import SegueSystem
+import SegueUI
+import UniformTypeIdentifiers
 
 /// Arguments for checks that print and exit, so they can run from a terminal without
 /// showing UI, installing an event tap or moving windows.
@@ -44,6 +46,10 @@ enum CommandLineTools {
         if let i = args.firstIndex(of: "--focus"), i + 1 < args.count, let id = WindowID(args[i + 1]) {
             return focus(id)
         }
+        if let i = args.firstIndex(of: "--render-preview"), i + 1 < args.count {
+            let sample = args.firstIndex(of: "--sample").flatMap { $0 + 1 < args.count ? Int(args[$0 + 1]) : nil }
+            return renderPreview(to: args[i + 1], sample: sample)
+        }
         if args.contains("--help") {
             print("""
             Segue \(SegueVersion.string)
@@ -55,6 +61,9 @@ enum CommandLineTools {
                                each change, then the CPU time used
               --focus <id>     focus one window (ids from --dump-windows) and time it.
                                Moves focus and may switch Space.
+              --render-preview <png> [--sample <n>]
+                               draw the switcher offscreen into a PNG, with the real
+                               window list or n made-up windows (no screen capture)
               --help           this help
             """)
             return 0
@@ -127,5 +136,38 @@ extension CommandLineTools {
         }
         print("[FAIL] \(id) \(label): not the focused window within 1.5 s (request \(fmt(outcome!.requestMs)) ms)")
         return 1
+    }
+}
+
+extension CommandLineTools {
+    @MainActor
+    static func renderPreview(to path: String, sample: Int?) -> Int32 {
+        _ = NSApplication.shared
+        var model = SwitcherModel()
+        if let sample {
+            let apps = ["Safari", "Zed", "Ghostty", "Finder", "Xcode", "Notes", "Mail", "T3 Code"]
+            let kinds: [WindowInfo.Kind] = [.onScreen, .onScreen, .otherSpace, .minimized, .appHidden]
+            model.cards = (0..<sample).map { i in
+                let app = apps[i % apps.count]
+                let icon = NSWorkspace.shared.icon(for: .application)
+                return .init(id: WindowID(i + 1), title: i % 7 == 3 ? "設計メモ — 日本語のタイトル \(i)" : "\(app) window \(i) with a fairly long title", appName: app,
+                             icon: icon, image: nil, kind: kinds[i % kinds.count])
+            }
+        } else {
+            let (windows, _, _) = WindowInventory.buildOnce()
+            model.cards = windows.map { w in
+                .init(id: w.id, title: w.title, appName: w.appName, icon: NSRunningApplication(processIdentifier: w.pid)?.icon,
+                      image: nil, kind: w.kind)
+            }
+        }
+        model.selectedIndex = model.cards.count > 1 ? 1 : 0
+        model.hint = "release ⌥ to switch  ·  esc to cancel  ·  type to search"
+        guard let screen = NSScreen.screens.first, let image = SwitcherWindowController().renderImage(model, on: screen),
+              let destination = CGImageDestinationCreateWithURL(URL(fileURLWithPath: path) as CFURL, UTType.png.identifier as CFString, 1, nil)
+        else { return 1 }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { return 1 }
+        print("wrote \(path) (\(image.width)×\(image.height) px, \(model.cards.count) cards)")
+        return 0
     }
 }

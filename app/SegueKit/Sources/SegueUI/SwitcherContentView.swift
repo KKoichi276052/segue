@@ -2,20 +2,27 @@ import AppKit
 import QuartzCore
 import SegueCore
 
-/// The switcher's content: a black shape that grows out of the notch, with the windows in it.
-/// For now a plain list of titles (M1 step 6); the card grid replaces it in step 7.
+/// The switcher's content (docs/SPEC.md §11 M1 view, Proposed): a black shape that grows out
+/// of the notch, holding a grid of window cards, most recently used first. Each card shows
+/// the window's picture, or its app icon when there's no picture yet or no Screen Recording,
+/// with the title and app name underneath.
 public final class SwitcherContentView: NSView {
     var onChoose: ((Int) -> Void)?
 
-    private let shape = CAShapeLayer()
-    private var rowLayers: [CATextLayer] = []
-    private let highlight = CALayer()
-    private var rowFrames: [CGRect] = []
-    private var model = SwitcherModel()
+    /// Space for the search bar, under the notch. The field itself is added in `searchField`.
+    static let searchBarHeight: CGFloat = 40
+    private let padding: CGFloat = 20
+    private let topGap: CGFloat = 14
+    private let footerHeight: CGFloat = 30
 
-    private let rowHeight: CGFloat = 26
-    private let width: CGFloat = 560
-    private let maxRows = 16
+    private let shape = CAShapeLayer()
+    private let gridLayer = CALayer()
+    private let footer = CATextLayer()
+    private var cards: [WindowID: CardLayer] = [:]
+    private var visibleFrames: [(index: Int, frame: CGRect)] = []
+    private var model = SwitcherModel()
+    private var announcedID: WindowID?
+    private(set) var searchBarFrame: CGRect = .zero
 
     public override init(frame: NSRect) {
         super.init(frame: frame)
@@ -23,9 +30,13 @@ public final class SwitcherContentView: NSView {
         layer?.masksToBounds = false
         shape.fillColor = CGColor(gray: 0, alpha: 1)
         layer?.addSublayer(shape)
-        highlight.backgroundColor = CGColor(gray: 1, alpha: 0.16)
-        highlight.cornerRadius = 6
-        layer?.addSublayer(highlight)
+        layer?.addSublayer(gridLayer)
+        footer.fontSize = 11
+        footer.foregroundColor = CGColor(gray: 1, alpha: 0.5)
+        footer.alignmentMode = .center
+        footer.truncationMode = .end
+        layer?.addSublayer(footer)
+        setAccessibilityElement(true)
         setAccessibilityRole(.list)
         setAccessibilityLabel("Segue window switcher")
     }
@@ -42,65 +53,154 @@ public final class SwitcherContentView: NSView {
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
 
-        let count = min(model.cards.count, maxRows)
-        let first = max(0, min((model.selectedIndex ?? 0) - maxRows / 2, model.cards.count - count))
-        let bodyHeight = CGFloat(max(count, 1)) * rowHeight + 24
-        let size = CGSize(width: width, height: anchor.height + bodyHeight)
-        frame = CGRect(origin: .zero, size: size)
+        let searchHeight = model.showsSearchBar ? Self.searchBarHeight : 0
+        let chrome = anchor.height + topGap + searchHeight + footerHeight
+        // The panel hangs from the top of the screen down to just above the Dock.
+        let available = CGSize(width: visible.width - 2 * padding - 80, height: screen.maxY - visible.minY - chrome - 24)
+        let grid = GridLayout.compute(count: model.cards.count, available: CGSize(width: max(available.width, 200), height: max(available.height, 120)))
+        let firstRow = grid.firstVisibleRow(selected: model.selectedIndex)
 
+        let width = max(grid.size.width + 2 * padding, anchor.width + 160, 420)
+        let gridHeight = model.cards.isEmpty ? 60 : grid.size.height
+        let height = chrome + gridHeight
+        frame = CGRect(x: 0, y: 0, width: width, height: height)
+
+        // The black shape: the notch (real or virtual) joined to the body by its own width.
         let path = CGMutablePath()
-        let notch = CGRect(x: (width - anchor.width) / 2, y: 0, width: anchor.width, height: anchor.height + 12)
-        path.addRoundedRect(in: notch, cornerWidth: 8, cornerHeight: 8)
-        path.addRoundedRect(in: CGRect(x: 0, y: anchor.height, width: width, height: bodyHeight), cornerWidth: 22, cornerHeight: 22)
+        let notchWidth = anchor.width
+        path.addRoundedRect(in: CGRect(x: (width - notchWidth) / 2, y: -1, width: notchWidth, height: anchor.height + 20),
+                            cornerWidth: virtualNotch ? 10 : 8, cornerHeight: virtualNotch ? 10 : 8)
+        path.addRoundedRect(in: CGRect(x: 0, y: anchor.height, width: width, height: height - anchor.height), cornerWidth: 24, cornerHeight: 24)
         shape.path = path
 
-        while rowLayers.count < maxRows + 1 {
-            let text = CATextLayer()
-            text.fontSize = 13
-            text.foregroundColor = CGColor(gray: 1, alpha: 1)
-            text.truncationMode = .end
-            text.isWrapped = false
-            layer?.addSublayer(text)
-            rowLayers.append(text)
+        searchBarFrame = CGRect(x: padding, y: anchor.height + topGap - 4, width: width - 2 * padding, height: searchHeight)
+        let gridOrigin = CGPoint(x: (width - grid.size.width) / 2, y: anchor.height + topGap + searchHeight)
+        gridLayer.frame = CGRect(origin: gridOrigin, size: grid.size)
+
+        // Cards: reuse layers by window, hide the ones not in view.
+        var used = Set<WindowID>()
+        visibleFrames = []
+        for (index, card) in model.cards.enumerated() {
+            guard let cardFrame = grid.frame(of: index, firstRow: firstRow) else { continue }
+            let layer = cards[card.id] ?? {
+                let layer = CardLayer()
+                cards[card.id] = layer
+                gridLayer.addSublayer(layer)
+                return layer
+            }()
+            layer.isHidden = false
+            layer.update(card: card, frame: cardFrame, selected: index == model.selectedIndex, scale: scale)
+            used.insert(card.id)
+            visibleFrames.append((index, cardFrame.offsetBy(dx: gridOrigin.x, dy: gridOrigin.y)))
         }
-        rowFrames = []
-        for (i, text) in rowLayers.enumerated() {
-            text.contentsScale = scale
-            guard i < count || (i == 0 && model.cards.isEmpty) else {
-                text.isHidden = true
-                continue
-            }
-            text.isHidden = false
-            let y = anchor.height + 12 + CGFloat(i) * rowHeight
-            text.frame = CGRect(x: 24, y: y + 5, width: width - 48, height: rowHeight - 6)
-            if model.cards.isEmpty {
-                text.string = model.isSearching ? "No matches" : "No windows"
-                continue
-            }
-            let card = model.cards[first + i]
-            text.string = "\(card.appName) — \(card.title.isEmpty ? "Untitled" : card.title)" + (card.kind == .onScreen ? "" : "  · \(card.kind.rawValue)")
-            rowFrames.append(CGRect(x: 12, y: y, width: width - 24, height: rowHeight))
+        for (id, layer) in cards where !used.contains(id) {
+            layer.removeFromSuperlayer()
+            cards[id] = nil
         }
-        if let selected = model.selectedIndex, (first..<first + count).contains(selected) {
-            highlight.isHidden = false
-            highlight.frame = rowFrames[selected - first]
-            if let card = model.selected {
-                NSAccessibility.post(element: self, notification: .announcementRequested,
-                                     userInfo: [.announcement: "\(card.appName), \(card.title)", .priority: NSAccessibilityPriorityLevel.high.rawValue])
-            }
-        } else {
-            highlight.isHidden = true
+
+        var hint = model.hint
+        if model.cards.isEmpty { hint = model.isSearching ? "No matching windows" : "No windows" }
+        if grid.isPaged {
+            let shown = min(model.cards.count, grid.visibleRows * grid.columns)
+            hint += "  ·  \(shown) of \(model.cards.count) shown"
         }
-        rowOffset = first
-        return CGRect(x: anchor.midX - width / 2, y: screen.maxY - size.height, width: size.width, height: size.height)
+        footer.contentsScale = scale
+        if footer.string as? String != hint { footer.string = hint }
+        footer.frame = model.cards.isEmpty
+            ? CGRect(x: padding, y: gridOrigin.y + 20, width: width - 2 * padding, height: 18)
+            : CGRect(x: padding, y: height - footerHeight + 7, width: width - 2 * padding, height: 16)
+
+        announceSelection()
+        let x = min(max(anchor.midX - width / 2, screen.minX), screen.maxX - width)
+        return CGRect(x: x, y: screen.maxY - height, width: width, height: height)
     }
 
-    private var rowOffset = 0
+    private func announceSelection() {
+        guard let card = model.selected, card.id != announcedID else { return }
+        announcedID = card.id
+        let text = "\(card.title.isEmpty ? "Untitled" : card.title), \(card.appName)"
+        NSAccessibility.post(element: self, notification: .announcementRequested,
+                             userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+    }
 
     public override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if let i = rowFrames.firstIndex(where: { $0.contains(point) }) {
-            onChoose?(rowOffset + i)
+        if let hit = visibleFrames.first(where: { $0.frame.contains(point) }) {
+            onChoose?(hit.index)
         }
+    }
+}
+
+/// One window card.
+nonisolated private final class CardLayer: CALayer {
+    private let selection = CALayer()
+    private let picture = CALayer()
+    private let bigIcon = CALayer()
+    private let smallIcon = CALayer()
+    private let title = CATextLayer()
+    private let subtitle = CATextLayer()
+    private var current: (title: String, subtitle: String, image: CGImage?, icon: NSImage?, selected: Bool, size: CGSize)?
+
+    override init() {
+        super.init()
+        selection.backgroundColor = CGColor(gray: 1, alpha: 0.14)
+        selection.cornerRadius = 12
+        selection.isHidden = true
+        addSublayer(selection)
+        picture.backgroundColor = CGColor(gray: 0.13, alpha: 1)
+        picture.cornerRadius = 8
+        picture.masksToBounds = true
+        picture.contentsGravity = .resizeAspect
+        picture.borderColor = CGColor(gray: 1, alpha: 1)
+        addSublayer(picture)
+        bigIcon.contentsGravity = .resizeAspect
+        picture.addSublayer(bigIcon)
+        smallIcon.contentsGravity = .resizeAspect
+        addSublayer(smallIcon)
+        for (text, size, alpha) in [(title, CGFloat(12), CGFloat(1)), (subtitle, CGFloat(10.5), CGFloat(0.55))] {
+            text.fontSize = size
+            text.font = NSFont.systemFont(ofSize: size, weight: text === title ? .medium : .regular)
+            text.foregroundColor = CGColor(gray: 1, alpha: alpha)
+            text.truncationMode = .end
+            text.isWrapped = false
+            addSublayer(text)
+        }
+    }
+
+    override init(layer: Any) { super.init(layer: layer) }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    func update(card: SwitcherModel.Card, frame: CGRect, selected: Bool, scale: CGFloat) {
+        self.frame = frame
+        let titleText = card.title.isEmpty ? "Untitled" : card.title
+        let subtitleText = card.kind == .onScreen ? card.appName : "\(card.appName) · \(card.kind.rawValue)"
+        let changed = current.map {
+            $0.title != titleText || $0.subtitle != subtitleText || $0.image !== card.image || $0.icon !== card.icon
+                || $0.selected != selected || $0.size != frame.size
+        } ?? true
+        guard changed else { return }
+        current = (titleText, subtitleText, card.image, card.icon, selected, frame.size)
+
+        let labelHeight: CGFloat = 38
+        let pictureFrame = CGRect(x: 0, y: 0, width: frame.width, height: frame.height - labelHeight)
+        selection.frame = bounds.insetBy(dx: -6, dy: -6)
+        selection.isHidden = !selected
+        picture.frame = pictureFrame
+        picture.borderWidth = selected ? 2.5 : 0
+        picture.contents = card.image
+        picture.backgroundColor = card.image == nil ? CGColor(gray: 0.13, alpha: 1) : CGColor(gray: 0, alpha: 1)
+        let iconSide = min(64, pictureFrame.height * 0.45)
+        bigIcon.frame = CGRect(x: (pictureFrame.width - iconSide) / 2, y: (pictureFrame.height - iconSide) / 2, width: iconSide, height: iconSide)
+        bigIcon.isHidden = card.image != nil
+        bigIcon.contents = card.icon
+        smallIcon.frame = CGRect(x: 0, y: pictureFrame.maxY + 7, width: 16, height: 16)
+        smallIcon.contents = card.icon
+        for text in [title, subtitle] { text.contentsScale = scale }
+        title.string = titleText
+        title.frame = CGRect(x: 21, y: pictureFrame.maxY + 6, width: frame.width - 21, height: 16)
+        subtitle.string = subtitleText
+        subtitle.frame = CGRect(x: 21, y: pictureFrame.maxY + 22, width: frame.width - 21, height: 14)
     }
 }

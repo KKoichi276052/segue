@@ -111,6 +111,28 @@ public final class SwitcherWindowController {
         keepsPanelOnScreen ? park() : panel.orderOut(nil)
     }
 
+    /// Renders the switcher's layers offscreen, for checking layout without showing the panel
+    /// or capturing the screen.
+    public func renderImage(_ model: SwitcherModel, on screen: NSScreen) -> CGImage? {
+        let anchor = NotchGeometry.anchor(on: screen)
+        let view = SwitcherContentView()
+        let frame = view.layout(model: model, screen: screen.frame, visible: screen.visibleFrame, anchor: anchor.rect,
+                                virtualNotch: anchor.isVirtual, scale: screen.backingScaleFactor)
+        guard let layer = view.layer else { return nil }
+        let scale = screen.backingScaleFactor
+        let width = Int(frame.width * scale), height = Int(frame.height * scale)
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        context.setFillColor(CGColor(gray: 0.85, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        // The view is flipped: draw with the origin at the top left.
+        context.translateBy(x: 0, y: CGFloat(height))
+        context.scaleBy(x: scale, y: -scale)
+        layer.render(in: context)
+        return context.makeImage()
+    }
+
     private func park() {
         panel.alphaValue = 0
         panel.ignoresMouseEvents = true

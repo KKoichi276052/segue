@@ -168,6 +168,10 @@ final class SwitcherCoordinator {
         model.selectedIndex = state.selectedIndex
         model.query = state.query
         model.isSearching = state.isSearching
+        switch state.phase {
+        case .open: model.hint = "return to switch  ·  esc to close  ·  type to search"
+        default: model.hint = "release ⌥ to switch  ·  esc to cancel  ·  type to search"
+        }
         return model
     }
 

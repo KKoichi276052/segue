@@ -25,6 +25,10 @@ public struct SwitcherModel {
     public var selectedIndex: Int?
     public var query = ""
     public var isSearching = false
+    /// Whether the search bar shows, even while empty (a search was started).
+    public var showsSearchBar = false
+    /// Key hints along the bottom edge.
+    public var hint = ""
 
     public init() {}
 
