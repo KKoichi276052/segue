@@ -1,0 +1,13 @@
+// Build settings shared by Debug and Release.
+//
+// Permissions (Device Control and Data Access, Screen Recording) are tied to the app's
+// code signature. Ad-hoc signing, the default here, changes the signature on every build,
+// so macOS forgets the grants after each rebuild. To keep them, sign in to Xcode with your
+// Apple ID (Settings › Accounts), copy Local.xcconfig.example to Local.xcconfig and set
+// your team. Local.xcconfig is ignored by git.
+
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = -
+DEVELOPMENT_TEAM =
+
+#include? "Local.xcconfig"
