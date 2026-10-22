@@ -63,7 +63,10 @@ $B --watch-windows 60     # live changes for 60 s, then CPU use
 $B --self-check           # the private calls
 $B --focus <id>           # focus one window and time it (moves focus)
 $B --render-preview /tmp/s.png --sample 40 --query doc   # draw the switcher offscreen
+$B --bench-search         # time each search keystroke for 100 made-up windows
 $B --no-input             # run without the hotkey and the event tap
 ```
+
+`--watch-windows` also times reading the list on the main thread. An option the binary doesn't know prints an error and exits, instead of starting the app.
 
 The hands-on checks for M1 are in [M1-CHECKLIST.md](M1-CHECKLIST.md).

@@ -61,7 +61,7 @@ public final class SwitcherContentView: NSView {
     public override var isFlipped: Bool { true }
 
     /// Lays out for `model` and returns the panel frame in global coordinates.
-    func layout(model: SwitcherModel, screen: CGRect, visible: CGRect, anchor: CGRect, virtualNotch: Bool, scale: CGFloat) -> CGRect {
+    public func layout(model: SwitcherModel, screen: CGRect, visible: CGRect, anchor: CGRect, virtualNotch: Bool, scale: CGFloat) -> CGRect {
         self.model = model
         CATransaction.begin()
         CATransaction.setDisableActions(true)

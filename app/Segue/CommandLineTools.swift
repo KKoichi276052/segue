@@ -50,6 +50,10 @@ enum CommandLineTools {
             let sample = args.firstIndex(of: "--sample").flatMap { $0 + 1 < args.count ? Int(args[$0 + 1]) : nil }
             return renderPreview(to: args[i + 1], sample: sample)
         }
+        if args.contains("--bench-search") {
+            let sample = args.firstIndex(of: "--sample").flatMap { $0 + 1 < args.count ? Int(args[$0 + 1]) : nil } ?? 100
+            return benchSearch(sample: sample)
+        }
         if args.contains("--help") {
             print("""
             Segue \(SegueVersion.string)
@@ -64,10 +68,21 @@ enum CommandLineTools {
               --render-preview <png> [--sample <n>]
                                draw the switcher offscreen into a PNG, with the real
                                window list or n made-up windows (no screen capture)
+              --bench-search [--sample <n>]
+                               time each search keystroke (ranking, reordering and
+                               laying out the grid offscreen) for n made-up windows
+                               (default 100)
               --no-input       run the app without the hotkey and the event tap
               --help           this help
             """)
             return 0
+        }
+        // An option this build doesn't know (a typo, or a check from a newer build) must not
+        // start the app, which would register the hotkey and install the event tap.
+        let known: Set = ["--no-input", "--sample", "--query"]
+        if let unknown = args.first(where: { $0.hasPrefix("--") && !known.contains($0) }) {
+            FileHandle.standardError.write(Data("Unknown option \(unknown). See --help.\n".utf8))
+            return 2
         }
         return nil
     }
@@ -104,6 +119,8 @@ extension CommandLineTools {
         getrusage(RUSAGE_SELF, &usage)
         let cpu = Double(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) + Double(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1e6
         print(WindowReport.table(inventory.snapshot.windows, focusedID: inventory.snapshot.focusedID))
+        let (copies, readMs) = measure { (0..<1000).map { _ in inventory.snapshot.windows } }
+        print("reading the list (\(copies[0].count) windows) on the main thread: \(fmt(readMs / 1000, 4)) ms")
         print("\(inventory.snapshot.refreshCount) refreshes; CPU \(fmt(cpu, 3)) s over \(Int(seconds)) s (\(fmt(cpu / seconds * 100, 3))%)")
     }
 }
@@ -146,14 +163,7 @@ extension CommandLineTools {
         _ = NSApplication.shared
         var model = SwitcherModel()
         if let sample {
-            let apps = ["Safari", "Zed", "Ghostty", "Finder", "Xcode", "Notes", "Mail", "T3 Code"]
-            let kinds: [WindowInfo.Kind] = [.onScreen, .onScreen, .otherSpace, .minimized, .appHidden]
-            model.cards = (0..<sample).map { i in
-                let app = apps[i % apps.count]
-                let icon = NSWorkspace.shared.icon(for: .application)
-                return .init(id: WindowID(i + 1), title: i % 7 == 3 ? "設計メモ — 日本語のタイトル \(i)" : "\(app) window \(i) with a fairly long title", appName: app,
-                             icon: icon, image: nil, kind: kinds[i % kinds.count])
-            }
+            model.cards = sampleCards(sample)
         } else {
             let (windows, _, _) = WindowInventory.buildOnce()
             model.cards = windows.map { w in
@@ -165,9 +175,7 @@ extension CommandLineTools {
         model.hint = "release ⌥ to switch  ·  esc to cancel  ·  type to search"
         if let q = CommandLine.arguments.firstIndex(of: "--query"), q + 1 < CommandLine.arguments.count {
             let query = CommandLine.arguments[q + 1]
-            let infos = model.cards.map { WindowInfo(id: $0.id, pid: 0, appName: $0.appName, bundleID: nil, title: $0.title, frame: .zero,
-                                                     isMinimized: false, isAppHidden: false, isOnScreen: true, hasAccessibilityElement: true) }
-            let order = SearchIndex(windows: infos).search(query)
+            let order = SearchIndex(windows: windowInfos(model.cards)).search(query)
             let byID = Dictionary(model.cards.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
             model.cards = order.compactMap { byID[$0] }
             model.selectedIndex = model.cards.isEmpty ? nil : 0
@@ -183,5 +191,74 @@ extension CommandLineTools {
         guard CGImageDestinationFinalize(destination) else { return 1 }
         print("wrote \(path) (\(image.width)×\(image.height) px, \(model.cards.count) cards)")
         return 0
+    }
+}
+
+extension CommandLineTools {
+    /// Made-up cards for layout checks: several apps, every kind of window, some Japanese titles.
+    @MainActor
+    static func sampleCards(_ count: Int) -> [SwitcherModel.Card] {
+        let apps = ["Safari", "Zed", "Ghostty", "Finder", "Xcode", "Notes", "Mail", "T3 Code"]
+        let kinds: [WindowInfo.Kind] = [.onScreen, .onScreen, .otherSpace, .minimized, .appHidden]
+        let icon = NSWorkspace.shared.icon(for: .application)
+        return (0..<count).map { i in
+            let app = apps[i % apps.count]
+            return .init(id: WindowID(i + 1), title: i % 7 == 3 ? "設計メモ — 日本語のタイトル \(i)" : "\(app) window \(i) with a fairly long title", appName: app,
+                         icon: icon, image: nil, kind: kinds[i % kinds.count])
+        }
+    }
+
+    @MainActor
+    static func windowInfos(_ cards: [SwitcherModel.Card]) -> [WindowInfo] {
+        cards.map { WindowInfo(id: $0.id, pid: 0, appName: $0.appName, bundleID: nil, title: $0.title, frame: .zero,
+                               isMinimized: false, isAppHidden: false, isOnScreen: true, hasAccessibilityElement: true) }
+    }
+
+    /// Times what one search keystroke costs on the main thread (§11 step 9: within 16 ms for
+    /// 100 windows): ranking, reordering the cards and laying out the grid's layers. The view
+    /// isn't in a window, so compositing by the window server isn't included.
+    @MainActor
+    static func benchSearch(sample: Int) -> Int32 {
+        _ = NSApplication.shared
+        guard let screen = NSScreen.screens.first else { return 1 }
+        let all = sampleCards(sample)
+        let byID = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let (index, indexMs) = measure { SearchIndex(windows: windowInfos(all)) }
+        let anchor = NotchGeometry.anchor(on: screen)
+        let view = SwitcherContentView()
+        func layout(_ model: SwitcherModel) {
+            _ = view.layout(model: model, screen: screen.frame, visible: screen.visibleFrame, anchor: anchor.rect,
+                            virtualNotch: anchor.isVirtual, scale: screen.backingScaleFactor)
+            view.layoutSubtreeIfNeeded()
+            CATransaction.flush()
+        }
+        var model = SwitcherModel()
+        model.cards = all
+        model.selectedIndex = 0
+        layout(model) // the panel is pre-warmed in the app, so the first layout isn't counted
+        // Typed one character at a time, then deleted again, as in daily use.
+        let queries = ["safari window", "zed 1", "日本語", "ＳＡＦ", "xcd", "設計メモ 3", "no match here"]
+        var samples: [Double] = []
+        for query in queries {
+            let typed = (1...query.count).map { String(query.prefix($0)) }
+            for text in typed + typed.reversed().dropFirst() {
+                let (_, ms) = measure {
+                    let order = index.search(text)
+                    model.cards = order.compactMap { byID[$0] }
+                    model.selectedIndex = model.cards.isEmpty ? nil : 0
+                    model.query = text
+                    model.isSearching = true
+                    model.showsSearchBar = true
+                    layout(model)
+                }
+                samples.append(ms)
+            }
+        }
+        guard let stats = Stats(samples) else { return 1 }
+        let pass = stats.max <= 16
+        print("\(sample) windows; index built in \(fmt(indexMs)) ms")
+        print("per keystroke: \(stats.summary)")
+        print("[\(pass ? "PASS" : "FAIL")] every keystroke within 16 ms")
+        return pass ? 0 : 1
     }
 }
