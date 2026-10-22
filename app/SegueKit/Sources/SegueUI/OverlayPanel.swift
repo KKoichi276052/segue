@@ -1,5 +1,6 @@
 import AppKit
 import QuartzCore
+import SegueCore
 
 /// The non-activating panel above the menu bar, on every Space and over full-screen apps
 /// (docs/SPEC.md §9 `OverlayPanel`), set up as in spikes/Sources/s6-panel/main.swift.
@@ -34,6 +35,10 @@ public final class SwitcherWindowController {
     public var onFirstFrame: ((ShowKind, Double) -> Void)?
     public var onChoose: ((Int) -> Void)?
     public var onClickOutside: (() -> Void)?
+    /// The search text changed (including text an input method is still composing).
+    public var onSearchTextChange: ((String) -> Void)?
+    /// A navigation key in the search field: arrows, Tab, esc, return.
+    public var onSearchCommand: ((KeyInput) -> Void)?
 
     /// Keep the panel on screen while hidden, transparent and ignoring the mouse, so a show
     /// never pays for ordering it in (the fallback if pre-warming isn't enough, §15).
@@ -52,6 +57,8 @@ public final class SwitcherWindowController {
     public init() {
         panel.contentView = content
         content.onChoose = { [weak self] in self?.onChoose?($0) }
+        content.searchField.onTextChange = { [weak self] in self?.onSearchTextChange?($0) }
+        content.searchField.onCommand = { [weak self] in self?.onSearchCommand?($0) }
     }
 
     public var contentView: SwitcherContentView { content }
@@ -97,6 +104,27 @@ public final class SwitcherWindowController {
         installOutsideMonitor()
     }
 
+    /// Gives the search field the keyboard without activating Segue: the app in front stays
+    /// in front. Optionally starts it with some text.
+    public func takeKeyboard(text: String? = nil) {
+        guard isShowing else { return }
+        panel.makeKey()
+        if panel.firstResponder !== content.searchField.currentEditor() {
+            panel.makeFirstResponder(content.searchField)
+        }
+        if let text { content.searchField.setText(text) }
+    }
+
+    /// Adds text typed while ⌥ is still held (the field doesn't see those keys).
+    public func appendSearchText(_ text: String) {
+        content.searchField.setText(content.searchField.currentText + text)
+        onSearchTextChange?(content.searchField.currentText)
+    }
+
+    public func clearSearchText() {
+        content.searchField.setText("")
+    }
+
     public func update(_ model: SwitcherModel) {
         guard isShowing, let screen = currentScreen else { return }
         layout(on: screen, model: model)
@@ -107,6 +135,8 @@ public final class SwitcherWindowController {
         isShowing = false
         if let outsideMonitor { NSEvent.removeMonitor(outsideMonitor) }
         outsideMonitor = nil
+        content.searchField.setText("")
+        panel.makeFirstResponder(nil)
         if panel.isKeyWindow { panel.resignKey() }
         keepsPanelOnScreen ? park() : panel.orderOut(nil)
     }
@@ -118,6 +148,9 @@ public final class SwitcherWindowController {
         let view = SwitcherContentView()
         let frame = view.layout(model: model, screen: screen.frame, visible: screen.visibleFrame, anchor: anchor.rect,
                                 virtualNotch: anchor.isVirtual, scale: screen.backingScaleFactor)
+        view.searchField.stringValue = model.query
+        view.layoutSubtreeIfNeeded()
+        view.display()
         guard let layer = view.layer else { return nil }
         let scale = screen.backingScaleFactor
         let width = Int(frame.width * scale), height = Int(frame.height * scale)

@@ -22,6 +22,7 @@ final class SwitcherCoordinator {
     /// Window images (docs/SPEC.md §15: cache and refresh). In memory only.
     private var previews = ByteLRU<WindowID, CGImage>(capacity: 60 * 1_048_576)
     private lazy var snapshots = SnapshotService { [weak self] id, image, _ in self?.received(image, for: id) }
+    private var searchIndex = SearchIndex(windows: [])
     /// How many cards to refresh on show; the rest keep their cached image.
     private let refreshLimit = 30
 
@@ -45,6 +46,14 @@ final class SwitcherCoordinator {
         window.onChoose = { [weak self] index in
             guard let self, state.items.indices.contains(index) else { return }
             apply(state.choose(state.items[index]))
+        }
+        window.onSearchTextChange = { [weak self] text in
+            guard let self else { return }
+            apply(state.queryChanged(text))
+        }
+        window.onSearchCommand = { [weak self] input in
+            guard let self else { return }
+            apply(state.handle(input, optionDown: false, from: .panel).effects)
         }
         window.onClickOutside = { [weak self] in
             guard let self else { return }
@@ -75,6 +84,7 @@ final class SwitcherCoordinator {
         holdMonitor.logsRawEvents = Settings.debugKeyLog
         inventory.onChange = { [weak self] snapshot in
             guard let self else { return }
+            searchIndex = SearchIndex(windows: snapshot.windows)
             apply(state.updateWindows(snapshot.windows.map(\.id), focusedID: snapshot.focusedID))
             previews.retain(Set(snapshot.windows.map(\.id)))
         }
@@ -142,8 +152,16 @@ final class SwitcherCoordinator {
                 if let left, left.id != id { captureAfterSwitch(left) }
             case .selectionChanged:
                 window.update(model())
-            case .beginSearch, .appendSearch, .search, .clearSearch:
-                break // M1 step 9
+            case .takeKeyboard:
+                window.takeKeyboard()
+            case .beginSearch(let text):
+                window.takeKeyboard(text: text)
+            case .appendSearch(let text):
+                window.appendSearchText(text)
+            case .search(let query):
+                apply(state.setResults(searchIndex.search(query)))
+            case .clearSearch:
+                window.clearSearchText()
             }
         }
     }
@@ -210,7 +228,9 @@ final class SwitcherCoordinator {
         model.selectedIndex = state.selectedIndex
         model.query = state.query
         model.isSearching = state.isSearching
+        model.showsSearchBar = state.isSearching
         switch state.phase {
+        case .open where state.isSearching: model.hint = "◀ ▶ to choose  ·  return to switch  ·  esc to clear"
         case .open: model.hint = "return to switch  ·  esc to close  ·  type to search"
         default: model.hint = "release ⌥ to switch  ·  esc to cancel  ·  type to search"
         }

@@ -162,6 +162,19 @@ extension CommandLineTools {
         }
         model.selectedIndex = model.cards.count > 1 ? 1 : 0
         model.hint = "release ⌥ to switch  ·  esc to cancel  ·  type to search"
+        if let q = CommandLine.arguments.firstIndex(of: "--query"), q + 1 < CommandLine.arguments.count {
+            let query = CommandLine.arguments[q + 1]
+            let infos = model.cards.map { WindowInfo(id: $0.id, pid: 0, appName: $0.appName, bundleID: nil, title: $0.title, frame: .zero,
+                                                     isMinimized: false, isAppHidden: false, isOnScreen: true, hasAccessibilityElement: true) }
+            let order = SearchIndex(windows: infos).search(query)
+            let byID = Dictionary(model.cards.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            model.cards = order.compactMap { byID[$0] }
+            model.selectedIndex = model.cards.isEmpty ? nil : 0
+            model.query = query
+            model.isSearching = true
+            model.showsSearchBar = true
+            model.hint = "◀ ▶ to choose  ·  return to switch  ·  esc to clear"
+        }
         guard let screen = NSScreen.screens.first, let image = SwitcherWindowController().renderImage(model, on: screen),
               let destination = CGImageDestinationCreateWithURL(URL(fileURLWithPath: path) as CFURL, UTType.png.identifier as CFString, 1, nil)
         else { return 1 }

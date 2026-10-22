@@ -23,6 +23,9 @@ public final class SwitcherContentView: NSView {
     private var model = SwitcherModel()
     private var announcedID: WindowID?
     private(set) var searchBarFrame: CGRect = .zero
+    let searchField = SearchField()
+    private let searchBackground = CALayer()
+    private let searchIcon = CATextLayer()
 
     public override init(frame: NSRect) {
         super.init(frame: frame)
@@ -36,6 +39,17 @@ public final class SwitcherContentView: NSView {
         footer.alignmentMode = .center
         footer.truncationMode = .end
         layer?.addSublayer(footer)
+        searchBackground.backgroundColor = CGColor(gray: 0.16, alpha: 1)
+        searchBackground.cornerRadius = 12
+        searchBackground.isHidden = true
+        layer?.addSublayer(searchBackground)
+        searchIcon.string = "⌕"
+        searchIcon.fontSize = 18
+        searchIcon.foregroundColor = CGColor(gray: 1, alpha: 0.5)
+        searchBackground.addSublayer(searchIcon)
+        // The field stays in the view, transparent, while the bar is hidden,
+        // so it can already have the keyboard when typing starts.
+        addSubview(searchField)
         setAccessibilityElement(true)
         setAccessibilityRole(.list)
         setAccessibilityLabel("Segue window switcher")
@@ -53,7 +67,7 @@ public final class SwitcherContentView: NSView {
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
 
-        let searchHeight = model.showsSearchBar ? Self.searchBarHeight : 0
+        let searchHeight = model.showsSearchBar ? Self.searchBarHeight + 10 : 0
         let chrome = anchor.height + topGap + searchHeight + footerHeight
         // The panel hangs from the top of the screen down to just above the Dock.
         let available = CGSize(width: visible.width - 2 * padding - 80, height: screen.maxY - visible.minY - chrome - 24)
@@ -73,7 +87,15 @@ public final class SwitcherContentView: NSView {
         path.addRoundedRect(in: CGRect(x: 0, y: anchor.height, width: width, height: height - anchor.height), cornerWidth: 24, cornerHeight: 24)
         shape.path = path
 
-        searchBarFrame = CGRect(x: padding, y: anchor.height + topGap - 4, width: width - 2 * padding, height: searchHeight)
+        searchBarFrame = CGRect(x: padding, y: anchor.height + topGap - 4, width: width - 2 * padding, height: model.showsSearchBar ? Self.searchBarHeight : 0)
+        searchBackground.isHidden = !model.showsSearchBar
+        searchBackground.frame = searchBarFrame.insetBy(dx: 0, dy: 3)
+        searchIcon.contentsScale = scale
+        searchIcon.frame = CGRect(x: 12, y: (searchBackground.frame.height - 22) / 2, width: 20, height: 22)
+        searchField.alphaValue = model.showsSearchBar ? 1 : 0
+        searchField.frame = model.showsSearchBar
+            ? CGRect(x: searchBarFrame.minX + 38, y: searchBarFrame.midY - 11, width: searchBarFrame.width - 50, height: 22)
+            : CGRect(x: padding, y: anchor.height, width: 200, height: 22)
         let gridOrigin = CGPoint(x: (width - grid.size.width) / 2, y: anchor.height + topGap + searchHeight)
         gridLayer.frame = CGRect(origin: gridOrigin, size: grid.size)
 

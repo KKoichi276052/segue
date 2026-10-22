@@ -25,6 +25,8 @@ public enum InputSource: Sendable {
 /// What the app should do after a state change. Applied in order.
 public enum SwitcherEffect: Equatable, Sendable {
     case scheduleShow(afterMs: Int)
+    /// The switcher stays open: give its search field the keyboard, so typing searches.
+    case takeKeyboard
     case cancelScheduledShow
     case show
     case hide
@@ -159,7 +161,7 @@ public struct SwitcherState: Sendable {
                 phase = .open
                 latchedWithOption = optionDown
                 query = text
-                return (true, (pending ? [.cancelScheduledShow, .show] : []) + [.beginSearch(text), .search(text)])
+                return (true, (pending ? [.cancelScheduledShow, .show] : []) + [.takeKeyboard, .beginSearch(text), .search(text)])
             case .other:
                 return (true, [])
             }
@@ -221,13 +223,13 @@ public struct SwitcherState: Sendable {
         case .hidden:
             open(backward: false)
             phase = .open
-            return [.show, .selectionChanged]
+            return [.show, .takeKeyboard, .selectionChanged]
         case .holdPending:
             phase = .open
-            return [.cancelScheduledShow, .show]
+            return [.cancelScheduledShow, .show, .takeKeyboard]
         case .holding:
             phase = .open
-            return []
+            return [.takeKeyboard]
         case .open:
             return close()
         }

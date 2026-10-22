@@ -84,7 +84,7 @@ import Testing
         _ = s.handle(.tab(backward: false), optionDown: true, from: .eventTap)
         let r = s.handle(.character("s"), optionDown: true, from: .eventTap)
         #expect(r.swallow)
-        #expect(r.effects == [.cancelScheduledShow, .show, .beginSearch("s"), .search("s")])
+        #expect(r.effects == [.cancelScheduledShow, .show, .takeKeyboard, .beginSearch("s"), .search("s")])
         #expect(s.phase == .open)
         // Still holding ⌥: later letters are added through the tap.
         #expect(s.handle(.character("a"), optionDown: true, from: .eventTap).effects == [.appendSearch("a")])
@@ -97,7 +97,7 @@ import Testing
 
     @Test func tapModeOpensAndStaysOpen() {
         var s = state()
-        #expect(s.toggleTap() == [.show, .selectionChanged])
+        #expect(s.toggleTap() == [.show, .takeKeyboard, .selectionChanged])
         #expect(s.phase == .open)
         #expect(s.selectedID == 2)
         #expect(s.optionReleased().isEmpty)
@@ -116,7 +116,7 @@ import Testing
     @Test func tapHotkeyDuringHoldKeepsItOpen() {
         var s = state()
         _ = s.handle(.tab(backward: false), optionDown: true, from: .eventTap)
-        #expect(s.toggleTap() == [.cancelScheduledShow, .show])
+        #expect(s.toggleTap() == [.cancelScheduledShow, .show, .takeKeyboard])
         #expect(s.optionReleased().isEmpty)
         #expect(s.phase == .open)
     }
@@ -184,6 +184,13 @@ import Testing
         _ = s.updateWindows([1, 2], focusedID: nil)
         _ = s.handle(.tab(backward: false), optionDown: true, from: .eventTap)
         #expect(s.selectedID == 1)
+    }
+
+    @Test func tapHotkeyAfterTheDelayTakesTheKeyboard() {
+        var s = state()
+        _ = s.handle(.tab(backward: false), optionDown: true, from: .eventTap)
+        _ = s.showDelayElapsed()
+        #expect(s.toggleTap() == [.takeKeyboard])
     }
 
     @Test func clickChooses() {
