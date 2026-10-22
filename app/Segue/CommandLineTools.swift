@@ -1,5 +1,6 @@
 import Foundation
 import SegueCore
+import SegueSystem
 
 /// Arguments for checks that print and exit, so they can run from a terminal without
 /// showing UI, installing an event tap or moving windows.
@@ -13,10 +14,15 @@ enum CommandLineTools {
             print("Segue \(SegueVersion.string)")
             return 0
         }
+        if args.contains("--permissions") {
+            print(PermissionsCoordinator.describe(PermissionsCoordinator.current()))
+            return 0
+        }
         if args.contains("--help") {
             print("""
             Segue \(SegueVersion.string)
               --version        print the version
+              --permissions    print which permissions this process has
               --help           this help
             """)
             return 0
