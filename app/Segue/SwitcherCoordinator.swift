@@ -19,6 +19,11 @@ final class SwitcherCoordinator {
     private var nextShowIsFirst = true
     private var pendingShow: (kind: SwitcherWindowController.ShowKind, eventTime: CFTimeInterval)?
     private var icons: [Int32: NSImage] = [:]
+    /// Window images (docs/SPEC.md §15: cache and refresh). In memory only.
+    private var previews = ByteLRU<WindowID, CGImage>(capacity: 60 * 1_048_576)
+    private lazy var snapshots = SnapshotService { [weak self] id, image, _ in self?.received(image, for: id) }
+    /// How many cards to refresh on show; the rest keep their cached image.
+    private let refreshLimit = 30
 
     var paused = false {
         didSet {
@@ -71,6 +76,7 @@ final class SwitcherCoordinator {
         inventory.onChange = { [weak self] snapshot in
             guard let self else { return }
             apply(state.updateWindows(snapshot.windows.map(\.id), focusedID: snapshot.focusedID))
+            previews.retain(Set(snapshot.windows.map(\.id)))
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.screensChanged() }
@@ -128,9 +134,12 @@ final class SwitcherCoordinator {
                 show()
             case .hide:
                 window.hide()
+                Task { await snapshots.cancelAll() }
             case .focus(let id):
                 guard let info = inventory.snapshot.windows.first(where: { $0.id == id }) else { break }
+                let left = inventory.snapshot.focusedID.flatMap { leftID in inventory.snapshot.windows.first { $0.id == leftID } }
                 focuser.focus(info)
+                if let left, left.id != id { captureAfterSwitch(left) }
             case .selectionChanged:
                 window.update(model())
             case .beginSearch, .appendSearch, .search, .clearSearch:
@@ -146,6 +155,39 @@ final class SwitcherCoordinator {
         window.show(model(), on: screen, kind: event.kind, eventTime: event.eventTime,
                     reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
         inventory.refreshSoon(reason: "show")
+        refreshPreviews()
+    }
+
+    // MARK: Previews
+
+    private func refreshPreviews() {
+        guard SnapshotService.isAllowed else { return }
+        let now = CACurrentMediaTime()
+        let ids = PreviewRefresh.order(visible: Array(state.items.prefix(refreshLimit)), selected: state.selectedID,
+                                       storedAt: { [previews] in previews.storedAt($0) }, now: now)
+        let sizes = Dictionary(inventory.snapshot.windows.map { ($0.id, $0.frame.size) }, uniquingKeysWith: { a, _ in a })
+        Task { await snapshots.request(ids, sizes: sizes) }
+    }
+
+    /// The window just left is what the owner last saw; capture it once it's behind.
+    private func captureAfterSwitch(_ window: WindowInfo) {
+        guard SnapshotService.isAllowed else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [snapshots] in
+            Task { await snapshots.requestOne(window.id, size: window.frame.size) }
+        }
+    }
+
+    private func received(_ image: CGImage, for id: WindowID) {
+        previews.insert(image, for: id, cost: image.bytesPerRow * image.height, at: CACurrentMediaTime())
+        if window.isShowing, state.items.contains(id) { window.update(model()) }
+    }
+
+    func previewSummary() async -> String {
+        let ms = await snapshots.captureMs
+        let blank = await snapshots.blankCount
+        let captures = Stats(ms).map { "captures: \($0.summary)" } ?? "captures: none yet"
+        return "\(captures); \(blank) blank\ncache: \(previews.count) images, \(previews.totalCost / 1_048_576) MB of \(previews.capacity / 1_048_576) MB"
+            + (SnapshotService.isAllowed ? "" : "\nScreen Recording is off: cards show icons and titles")
     }
 
     /// The display with the focused window (§6.10), else the one with the pointer.
@@ -163,7 +205,7 @@ final class SwitcherCoordinator {
         var model = SwitcherModel()
         model.cards = state.items.compactMap { id in
             guard let w = byID[id] else { return nil }
-            return .init(id: id, title: w.title, appName: w.appName, icon: icon(for: w.pid), image: nil, kind: w.kind)
+            return .init(id: id, title: w.title, appName: w.appName, icon: icon(for: w.pid), image: previews.value(for: id), kind: w.kind)
         }
         model.selectedIndex = state.selectedIndex
         model.query = state.query

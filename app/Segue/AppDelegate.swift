@@ -101,9 +101,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             .init("Timing summary") { [weak self] in
                 guard let self else { return }
-                report.show(title: "Hotkey to first frame", text: switcher.timings.summary()
-                    + "\n\nevent tap: \(switcher.holdMonitor.isInstalled ? "installed" : "not installed"), disabled by macOS \(switcher.holdMonitor.disabledCount) times"
-                    + "\nresident memory \(residentMemory() / 1_048_576) MB")
+                Task { @MainActor in
+                    let previews = await self.switcher.previewSummary()
+                    self.report.show(title: "Timing summary", text: self.switcher.timings.summary()
+                        + "\n\n" + previews
+                        + "\n\nevent tap: \(self.switcher.holdMonitor.isInstalled ? "installed" : "not installed"), disabled by macOS \(self.switcher.holdMonitor.disabledCount) times"
+                        + "\nresident memory \(residentMemory() / 1_048_576) MB")
+                }
             },
             .init("Log raw key events", checked: switcher.keyLogEnabled) { [weak self] in
                 self?.switcher.keyLogEnabled.toggle()
