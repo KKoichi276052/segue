@@ -138,7 +138,16 @@ public final class SwitcherWindowController {
         content.searchField.setText("")
         panel.makeFirstResponder(nil)
         if panel.isKeyWindow { panel.resignKey() }
+        stopFade()
         keepsPanelOnScreen ? park() : panel.orderOut(nil)
+    }
+
+    /// Ends a fade-in still running, so it can't make a hidden or parked panel visible again.
+    private func stopFade() {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            panel.animator().alphaValue = 0
+        }
     }
 
     /// Renders the switcher's layers offscreen, for checking layout without showing the panel

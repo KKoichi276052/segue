@@ -26,6 +26,10 @@ final class SwitcherCoordinator {
     /// How many cards to refresh on show; the rest keep their cached image.
     private let refreshLimit = 30
 
+    /// Called on each show, so the app can re-check permissions (a revoked permission
+    /// shows in the menu at the next show).
+    var onWillShow: (() -> Void)?
+
     var paused = false {
         didSet {
             holdMonitor.paused = paused
@@ -90,6 +94,25 @@ final class SwitcherCoordinator {
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.screensChanged() }
+        }
+        let workspace = NSWorkspace.shared.notificationCenter
+        // Another app coming forward (Cmd-Tab, the Dock) or another Space closes the switcher.
+        // Segue's own switches hide it first, so they never get here while it's open.
+        for name in [NSWorkspace.didActivateApplicationNotification, NSWorkspace.activeSpaceDidChangeNotification] {
+            workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.state.isVisible else { return }
+                    self.apply(self.state.dismiss())
+                }
+            }
+        }
+        workspace.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.holdMonitor.ensureEnabled()
+                self.nextShowIsFirst = true
+                self.prewarm()
+            }
         }
     }
 
@@ -172,6 +195,9 @@ final class SwitcherCoordinator {
         let screen = targetScreen()
         window.show(model(), on: screen, kind: event.kind, eventTime: event.eventTime,
                     reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        // After the panel is committed, so these never delay the first frame.
+        holdMonitor.ensureEnabled()
+        onWillShow?()
         inventory.refreshSoon(reason: "show")
         refreshPreviews()
     }
@@ -263,6 +289,11 @@ final class SwitcherCoordinator {
         var sample = SwitcherModel()
         sample.cards = [.init(id: 0, title: "Segue", appName: "Segue", icon: NSApp.applicationIconImage, image: nil, kind: .onScreen)]
         sample.selectedIndex = 0
-        for screen in NSScreen.screens { window.prewarm(on: screen, sample: sample) }
+        // One screen at a time: the panel's backing store depends on the screen's scale.
+        for (i, screen) in NSScreen.screens.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2 * Double(i)) { [weak self] in
+                self?.window.prewarm(on: screen, sample: sample)
+            }
+        }
     }
 }

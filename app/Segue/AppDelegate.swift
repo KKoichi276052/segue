@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar.willOpen = { [weak self] in self?.refreshPermissions() }
         menuBar.mainItems = { [weak self] in self?.mainMenuItems() ?? [] }
         menuBar.debugItems = { [weak self] in self?.debugMenuItems() ?? [] }
+        switcher.onWillShow = { [weak self] in self?.refreshPermissions() }
         for check in PrivateAPI.selfCheck() {
             Log.app.info("self-check \(check.ok ? "ok" : "MISSING", privacy: .public) \(check.name, privacy: .public): \(check.detail, privacy: .public)")
         }
@@ -70,6 +71,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .failed(let spec, _): state.warnings.append("\(spec.description) is taken by another app. Set TapHotkey with defaults write.")
         case .notRegistered: if inputEnabled && !switcher.paused { state.warnings.append("TapHotkey “\(Settings.tapHotkeyText)” isn't a valid hotkey") }
         }
+        if LoginItem.needsApproval {
+            state.warnings.append("Launch at Login needs approval in System Settings › General › Login Items")
+        }
         if inputEnabled && permissions.accessibility && !switcher.holdMonitor.isInstalled {
             state.warnings.append("Hold mode is off: the event tap couldn't be created")
         }
@@ -84,6 +88,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 refreshMenu()
             },
         ]
+        items.append(.init("Launch at Login", checked: LoginItem.isEnabled) { [weak self] in
+            LoginItem.setEnabled(!LoginItem.isEnabled)
+            self?.refreshMenu()
+        })
         if PermissionsFlow.step(for: permissions, screenRecordingSkipped: false) != .done {
             items.append(.init("Permissions…") { [weak self] in self?.showPermissions() })
         }
@@ -106,7 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.report.show(title: "Timing summary", text: self.switcher.timings.summary()
                         + "\n\n" + previews
                         + "\n\nevent tap: \(self.switcher.holdMonitor.isInstalled ? "installed" : "not installed"), disabled by macOS \(self.switcher.holdMonitor.disabledCount) times"
-                        + "\nresident memory \(residentMemory() / 1_048_576) MB")
+                        + "\nmemory (physical footprint) \(physicalFootprint() / 1_048_576) MB; resident \(residentMemory() / 1_048_576) MB")
                 }
             },
             .init("Log raw key events", checked: switcher.keyLogEnabled) { [weak self] in

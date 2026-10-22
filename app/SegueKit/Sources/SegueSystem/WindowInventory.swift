@@ -79,6 +79,13 @@ public final class WindowInventory: @unchecked Sendable {
             guard let pid = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.processIdentifier else { return }
             self?.thread.perform { self?.noteFocus(in: pid) }
         })
+        workspaceTokens.append(center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.thread.perform {
+                guard let self else { return }
+                self.dirty.formUnion(self.apps.map(\.pid))
+                self.scheduleRefresh(reason: "wake")
+            }
+        })
         workspaceTokens.append(center.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
             self?.thread.perform {
                 guard let self else { return }

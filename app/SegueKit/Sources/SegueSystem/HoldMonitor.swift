@@ -61,6 +61,17 @@ public final class HoldMonitor {
         return true
     }
 
+    /// Re-enables the tap if macOS turned it off without telling us (after sleep, for
+    /// example). Returns whether it was off.
+    @discardableResult
+    public func ensureEnabled() -> Bool {
+        guard let tap, !CGEvent.tapIsEnabled(tap: tap) else { return false }
+        CGEvent.tapEnable(tap: tap, enable: true)
+        disabledCount += 1
+        Log.keys.error("event tap was off; re-enabled")
+        return true
+    }
+
     public func uninstall() {
         if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
         if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }

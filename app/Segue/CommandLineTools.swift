@@ -64,6 +64,7 @@ enum CommandLineTools {
               --render-preview <png> [--sample <n>]
                                draw the switcher offscreen into a PNG, with the real
                                window list or n made-up windows (no screen capture)
+              --no-input       run the app without the hotkey and the event tap
               --help           this help
             """)
             return 0
