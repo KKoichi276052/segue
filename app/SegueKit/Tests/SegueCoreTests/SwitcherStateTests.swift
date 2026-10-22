@@ -193,6 +193,53 @@ import Testing
         #expect(s.toggleTap() == [.takeKeyboard])
     }
 
+    @Test func reRankingKeepsTheSelectionButANewQuerySelectsTheBest() {
+        var s = state()
+        _ = s.toggleTap()
+        _ = s.queryChanged("a")
+        _ = s.setResults([3, 2, 4])
+        _ = s.handle(.arrow(.right), optionDown: false, from: .panel)
+        #expect(s.selectedID == 2)
+        // A window changed: same query, results re-ranked.
+        #expect(s.updateWindows([1, 2, 3, 4, 5], focusedID: 1) == [.search("a")])
+        _ = s.setResults([5, 3, 2, 4])
+        #expect(s.selectedID == 2)
+        // The owner typed more: the best match is selected.
+        _ = s.queryChanged("ab")
+        _ = s.setResults([4, 2])
+        #expect(s.selectedID == 4)
+    }
+
+    @Test func navigationWhileOptionIsStillHeldAfterTyping() {
+        var s = state()
+        _ = s.handle(.tab(backward: false), optionDown: true, from: .eventTap)
+        _ = s.handle(.character("z"), optionDown: true, from: .eventTap)
+        _ = s.setResults([3, 4])
+        let right = s.handle(.arrow(.right), optionDown: true, from: .eventTap)
+        #expect(right.swallow)
+        #expect(s.selectedID == 4)
+        #expect(s.handle(.enter, optionDown: true, from: .eventTap).effects == [.hide, .focus(4)])
+    }
+
+    @Test func navigationAfterReleasingOptionGoesToTheField() {
+        var s = state()
+        _ = s.handle(.tab(backward: false), optionDown: true, from: .eventTap)
+        _ = s.handle(.character("z"), optionDown: true, from: .eventTap)
+        _ = s.optionReleased()
+        #expect(s.handle(.arrow(.right), optionDown: false, from: .eventTap).swallow == false)
+    }
+
+    @Test func tapHotkeyDuringAHoldComesThroughTheTap() {
+        var s = state()
+        #expect(s.handle(.tapHotkey, optionDown: true, from: .eventTap).swallow == false, "hidden: the hotkey fires itself")
+        _ = s.handle(.tab(backward: false), optionDown: true, from: .eventTap)
+        let r = s.handle(.tapHotkey, optionDown: true, from: .eventTap)
+        #expect(r.swallow)
+        #expect(r.effects == [.cancelScheduledShow, .show, .takeKeyboard])
+        #expect(s.phase == .open)
+        #expect(s.handle(.tapHotkey, optionDown: true, from: .eventTap).swallow == false, "open: the hotkey closes it itself")
+    }
+
     @Test func clickChooses() {
         var s = state()
         _ = s.toggleTap()

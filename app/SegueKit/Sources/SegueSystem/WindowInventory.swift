@@ -40,6 +40,11 @@ public final class WindowInventory: @unchecked Sendable {
     private var elements: [WindowID: AXUIElement] = [:]
     private var recency = RecencyList()
     private var focusedID: WindowID?
+    /// The frontmost app. Focus notifications from other apps (a background app opening a
+    /// window) must not change the recency order.
+    private var frontmostPID: Int32?
+    /// Apps whose observer couldn't be registered yet (they weren't answering), and attempts.
+    private var observeAttempts: [Int32: Int] = [:]
     private var refreshScheduled = false
     private var trusted = false
     private var published = Snapshot()
@@ -62,7 +67,10 @@ public final class WindowInventory: @unchecked Sendable {
             dirty = Set(apps.map(\.pid))
             for app in apps { observe(app.pid) }
             refresh(reason: "start")
-            if let frontmost { noteFocus(in: frontmost) }
+            if let frontmost {
+                frontmostPID = frontmost
+                noteFocus(in: frontmost)
+            }
         }
         let center = NSWorkspace.shared.notificationCenter
         let appNotifications: [Notification.Name] = [
@@ -77,7 +85,10 @@ public final class WindowInventory: @unchecked Sendable {
         }
         workspaceTokens.append(center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
             guard let pid = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.processIdentifier else { return }
-            self?.thread.perform { self?.noteFocus(in: pid) }
+            self?.thread.perform {
+                self?.frontmostPID = pid
+                self?.noteFocus(in: pid)
+            }
         })
         workspaceTokens.append(center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             self?.thread.perform {
@@ -177,6 +188,7 @@ public final class WindowInventory: @unchecked Sendable {
             CFRunLoopRemoveSource(thread.runLoop, AXObserverGetRunLoopSource(observer), .defaultMode)
         }
         observedWindows[pid] = nil
+        observeAttempts[pid] = nil
         axWindows[pid] = nil
         axReadPIDs.remove(pid)
         dirty.remove(pid)
@@ -203,9 +215,28 @@ public final class WindowInventory: @unchecked Sendable {
         }, &observer) == .success, let observer else { return }
         let app = AXUIElementCreateApplication(pid)
         let refcon = Unmanaged.passUnretained(self).toOpaque()
+        var registered = 0
         for name in Self.appNotifications {
-            AXObserverAddNotification(observer, app, name as CFString, refcon)
+            let result = AXObserverAddNotification(observer, app, name as CFString, refcon)
+            if result == .success || result == .notificationAlreadyRegistered { registered += 1 }
         }
+        guard registered > 0 else {
+            // Apps that just launched often don't answer yet. Try again later, a few times.
+            let attempts = observeAttempts[pid, default: 0] + 1
+            observeAttempts[pid] = attempts
+            if attempts <= 6 {
+                thread.perform(after: Double(attempts)) { [self] in
+                    guard apps.contains(where: { $0.pid == pid }) else { return }
+                    observe(pid)
+                    dirty.insert(pid)
+                    scheduleRefresh(reason: "observer retry")
+                }
+            } else {
+                Log.inventory.error("couldn't observe pid \(pid) after \(attempts) attempts")
+            }
+            return
+        }
+        observeAttempts[pid] = nil
         CFRunLoopAddSource(thread.runLoop, AXObserverGetRunLoopSource(observer), .defaultMode)
         observers[pid] = observer
     }
@@ -213,15 +244,19 @@ public final class WindowInventory: @unchecked Sendable {
     private func observeWindow(_ element: AXUIElement, id: WindowID, pid: Int32) {
         guard let observer = observers[pid], observedWindows[pid, default: []].insert(id).inserted else { return }
         let refcon = Unmanaged.passUnretained(self).toOpaque()
+        var registered = false
         for name in Self.windowNotifications {
-            AXObserverAddNotification(observer, element, name as CFString, refcon)
+            let result = AXObserverAddNotification(observer, element, name as CFString, refcon)
+            registered = registered || result == .success || result == .notificationAlreadyRegistered
         }
+        // Not registered: forget it, so the next refresh of this app tries again.
+        if !registered { observedWindows[pid]?.remove(id) }
     }
 
     private func received(_ notification: String, element: AXUIElement) {
         var pid: pid_t = 0
         AXUIElementGetPid(element, &pid)
-        if notification == kAXFocusedWindowChangedNotification || notification == kAXMainWindowChangedNotification {
+        if notification == kAXFocusedWindowChangedNotification || notification == kAXMainWindowChangedNotification, pid == frontmostPID {
             noteFocus(in: pid)
         }
         if notification == kAXUIElementDestroyedNotification, pid != 0 {
@@ -234,11 +269,19 @@ public final class WindowInventory: @unchecked Sendable {
     // MARK: Focus
 
     private func noteFocus(in pid: Int32) {
-        guard trusted else { return }
+        guard trusted, pid == frontmostPID else { return }
         let app = AXUIElementCreateApplication(pid)
         guard let window: AXUIElement = AX.attribute(app, kAXFocusedWindowAttribute),
               let id = PrivateAPI.windowID(of: window)
-        else { return }
+        else {
+            // The frontmost app has no focused window (the desktop, an app with all windows
+            // closed): no window is current, so ⌥ Tab goes to the most recent one.
+            if focusedID != nil {
+                focusedID = nil
+                publish()
+            }
+            return
+        }
         if focusedID != id || recency.order.first != id {
             recency.touch(id)
             focusedID = id

@@ -6,6 +6,9 @@ public enum KeyInput: Equatable, Sendable {
     case enter
     /// A printable character, without the effect of ⌥ (so ⌥ A is "a").
     case character(String)
+    /// The tap-mode hotkey (⌥ Space by default), seen by the event tap. During a hold the tap
+    /// swallows keys before the hotkey can fire, so it arrives here instead.
+    case tapHotkey
     /// Anything else, including Space.
     case other
 }
@@ -72,6 +75,9 @@ public struct SwitcherState: Sendable {
     private var focusedID: WindowID?
     /// A search started during a hold, and ⌥ is still down.
     private var latchedWithOption = false
+    /// The query the current results are for, so a re-rank after a window change keeps the
+    /// selection while a new query selects the best match.
+    private var resultsQuery: String?
 
     public init(showDelayMs: Int = 100) {
         self.showDelayMs = showDelayMs
@@ -92,8 +98,13 @@ public struct SwitcherState: Sendable {
         return setItems(ids, keepSelection: true)
     }
 
-    /// Search results for the current query, best first. Selects the best.
+    /// Search results for the current query, best first. A new query selects the best match;
+    /// results re-ranked for the same query (a window changed) keep the selected window.
     public mutating func setResults(_ ids: [WindowID]) -> [SwitcherEffect] {
+        if resultsQuery == query {
+            return setItems(ids, keepSelection: true)
+        }
+        resultsQuery = query
         items = ids
         selectedIndex = ids.isEmpty ? nil : 0
         return [.selectionChanged]
@@ -122,6 +133,7 @@ public struct SwitcherState: Sendable {
     private mutating func open(backward: Bool) {
         items = windows
         query = ""
+        resultsQuery = nil
         selectedIndex = startIndex(backward: backward)
     }
 
@@ -129,6 +141,11 @@ public struct SwitcherState: Sendable {
 
     /// Handles a key. Returns whether to swallow it (only meaningful from the event tap).
     public mutating func handle(_ input: KeyInput, optionDown: Bool, from source: InputSource) -> (swallow: Bool, effects: [SwitcherEffect]) {
+        if input == .tapHotkey {
+            // Only reaches the state from the tap. Outside a hold the hotkey itself fires.
+            guard phase == .holdPending || phase == .holding else { return (false, []) }
+            return (true, toggleTap())
+        }
         switch phase {
         case .hidden:
             guard source == .eventTap, case .tab(let backward) = input, optionDown else { return (false, []) }
@@ -162,7 +179,7 @@ public struct SwitcherState: Sendable {
                 latchedWithOption = optionDown
                 query = text
                 return (true, (pending ? [.cancelScheduledShow, .show] : []) + [.takeKeyboard, .beginSearch(text), .search(text)])
-            case .other:
+            case .other, .tapHotkey:
                 return (true, [])
             }
 
@@ -172,6 +189,12 @@ public struct SwitcherState: Sendable {
                 return (true, move(backward ? -1 : 1, wrap: true))
             case (.character(let text), .eventTap) where optionDown && latchedWithOption:
                 return (true, [.appendSearch(text)])
+            case (.arrow, .eventTap) where optionDown && latchedWithOption,
+                 (.enter, .eventTap) where optionDown && latchedWithOption,
+                 (.escape, .eventTap) where optionDown && latchedWithOption:
+                // ⌥ is still held from the hold: these would reach the field as ⌥ → (move by
+                // word) or ⌥ return, so handle them here as the panel would.
+                return handle(input, optionDown: false, from: .panel)
             case (_, .eventTap):
                 return (false, [])
             case (.tab(let backward), .panel):
@@ -181,6 +204,7 @@ public struct SwitcherState: Sendable {
             case (.escape, .panel):
                 if !query.isEmpty {
                     query = ""
+                    resultsQuery = nil
                     items = windows
                     selectedIndex = startIndex(backward: false)
                     return (true, [.clearSearch, .selectionChanged])
@@ -188,7 +212,7 @@ public struct SwitcherState: Sendable {
                 return (true, close())
             case (.enter, .panel):
                 return (true, finish())
-            case (.character, .panel), (.other, .panel):
+            case (.character, .panel), (.other, .panel), (.tapHotkey, .panel):
                 return (false, [])
             }
         }
@@ -240,6 +264,7 @@ public struct SwitcherState: Sendable {
         guard phase == .open, text != query else { return [] }
         query = text
         if text.isEmpty {
+            resultsQuery = nil
             items = windows
             selectedIndex = startIndex(backward: false)
             return [.selectionChanged]
@@ -265,6 +290,7 @@ public struct SwitcherState: Sendable {
         let was = phase
         phase = .hidden
         query = ""
+        resultsQuery = nil
         latchedWithOption = false
         switch was {
         case .hidden: return []

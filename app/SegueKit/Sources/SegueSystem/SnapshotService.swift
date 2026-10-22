@@ -25,8 +25,19 @@ public actor SnapshotService {
 
     public static var isAllowed: Bool { CGPreflightScreenCaptureAccess() }
 
+    /// The newest generation seen. Calls come from separate tasks that can arrive out of
+    /// order; anything older than the newest is ignored.
+    private var generation = 0
+
+    private func accept(_ generation: Int) -> Bool {
+        guard generation >= self.generation else { return false }
+        self.generation = generation
+        return true
+    }
+
     /// Replaces the queue with these windows, in order. `sizes` are the windows' sizes in points.
-    public func request(_ ids: [WindowID], sizes: [WindowID: CGSize]) {
+    public func request(_ ids: [WindowID], sizes: [WindowID: CGSize], generation: Int) {
+        guard accept(generation) else { return }
         queue = ids.compactMap { id in sizes[id].map { (id, (Double($0.width), Double($0.height))) } }
         guard !running, !queue.isEmpty else { return }
         running = true
@@ -34,7 +45,8 @@ public actor SnapshotService {
     }
 
     /// Appends one window, for the capture after a switch.
-    public func requestOne(_ id: WindowID, size: CGSize) {
+    public func requestOne(_ id: WindowID, size: CGSize, generation: Int) {
+        guard accept(generation) else { return }
         queue.removeAll { $0.id == id }
         queue.append((id, (Double(size.width), Double(size.height))))
         guard !running else { return }
@@ -42,7 +54,8 @@ public actor SnapshotService {
         Task { await drain() }
     }
 
-    public func cancelAll() {
+    public func cancelAll(generation: Int) {
+        guard accept(generation) else { return }
         queue.removeAll()
     }
 

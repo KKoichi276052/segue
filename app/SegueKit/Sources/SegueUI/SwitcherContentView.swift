@@ -69,9 +69,7 @@ public final class SwitcherContentView: NSView {
 
         let searchHeight = model.showsSearchBar ? Self.searchBarHeight + 10 : 0
         let chrome = anchor.height + topGap + searchHeight + footerHeight
-        // The panel hangs from the top of the screen down to just above the Dock.
-        let available = CGSize(width: visible.width - 2 * padding - 80, height: screen.maxY - visible.minY - chrome - 24)
-        let grid = GridLayout.compute(count: model.cards.count, available: CGSize(width: max(available.width, 200), height: max(available.height, 120)))
+        let grid = Self.grid(count: model.cards.count, screen: screen, visible: visible, anchor: anchor, showsSearchBar: model.showsSearchBar)
         let firstRow = grid.firstVisibleRow(selected: model.selectedIndex)
 
         let width = max(grid.size.width + 2 * padding, anchor.width + 160, 420)
@@ -135,6 +133,15 @@ public final class SwitcherContentView: NSView {
         announceSelection()
         let x = min(max(anchor.midX - width / 2, screen.minX), screen.maxX - width)
         return CGRect(x: x, y: screen.maxY - height, width: width, height: height)
+    }
+
+    /// The grid for `count` cards. The panel hangs from the top of the screen down to just
+    /// above the Dock.
+    static func grid(count: Int, screen: CGRect, visible: CGRect, anchor: CGRect, showsSearchBar: Bool) -> GridLayout {
+        let padding: CGFloat = 20, topGap: CGFloat = 14, footerHeight: CGFloat = 30
+        let chrome = anchor.height + topGap + (showsSearchBar ? searchBarHeight + 10 : 0) + footerHeight
+        let available = CGSize(width: visible.width - 2 * padding - 80, height: screen.maxY - visible.minY - chrome - 24)
+        return GridLayout.compute(count: count, available: CGSize(width: max(available.width, 200), height: max(available.height, 120)))
     }
 
     private func announceSelection() {

@@ -28,7 +28,7 @@ To start over with permissions: `tccutil reset All io.github.kkoichi276052.segue
 
 - **Hold ⌥, press Tab.** Tab and ⇧ Tab or the arrows move. Release ⌥ to switch; esc cancels. A quick ⌥ Tab switches to the previous window without showing anything.
 - **⌥ Space** opens the switcher and keeps it open: type to search, ◀ ▶ to choose, return to switch, esc to clear and then close.
-- **Typing a letter during a hold** starts a search and keeps the switcher open.
+- **Typing a letter during a hold** starts a search and keeps the switcher open. Letters typed while ⌥ is still held skip the input method, so for Japanese, let go of ⌥ first or use ⌥ Space.
 - The menu bar item shows warnings, and has Pause, Launch at Login and a Debug menu (window dump, timing summary, raw key log, private-API self-check).
 
 ## Settings

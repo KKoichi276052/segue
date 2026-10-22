@@ -89,6 +89,9 @@ Window ids come from `$B --dump-windows`.
 - [ ] Menu › Debug › Timing summary after 20 ⌥ Space presses and 20 holds, including the first after launch and the first after plugging in the Dell:
   - [ ] median within 16 ms;
   - [ ] first shows within 16 ms. If not, `defaults write io.github.kkoichi276052.segue KeepPanelOnScreen -bool true`, relaunch, measure again, and record idle CPU and energy (Activity Monitor › Energy) for both settings.
+- [ ] During a hold, ⌥ Space keeps the switcher open (tap mode).
+- [ ] With a background app opening a window (a download finishing, for example), a quick ⌥ Tab still goes to the window you used before the current one.
+- [ ] Click the desktop, then quick ⌥ Tab: Segue goes to your most recent window.
 - [ ] Menu › Pause Segue: ⌥ Tab and ⌥ Space reach other apps again. Unpause.
 - [ ] With Segue idle, `kill -STOP $(pgrep -x Segue)`. Typing in other apps recovers within a few seconds. Then `kill -CONT $(pgrep -x Segue)`.
 - [ ] kanata:
@@ -121,6 +124,8 @@ Window ids come from `$B --dump-windows`.
 
 - [ ] ⌥ Space, type part of a title. The bar appears under the notch and results narrow; ◀ ▶ choose; return switches.
 - [ ] Hold ⌥ Tab and type a letter. The switcher stays open after ⌥ is released, and typing continues in the bar.
+  - Known limitation: letters typed while ⌥ is still held skip the input method (they come through the event tap).
+  - While ⌥ is still held, ◀ ▶ and return work on the results.
 - [ ] Japanese IME: ⌥ Space, switch to Japanese input, type and convert a word in a Japanese window title.
   - [ ] The window is found.
   - [ ] Arrows and return work inside the conversion and only move the selection afterwards.

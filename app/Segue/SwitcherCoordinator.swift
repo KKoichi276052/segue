@@ -23,6 +23,11 @@ final class SwitcherCoordinator {
     private var previews = ByteLRU<WindowID, CGImage>(capacity: 60 * 1_048_576)
     private lazy var snapshots = SnapshotService { [weak self] id, image, _ in self?.received(image, for: id) }
     private var searchIndex = SearchIndex(windows: [])
+    /// Orders preview requests, which travel in separate tasks.
+    private var previewGeneration = 0
+    /// When Segue last focused a window: its activation and Space change arrive later and
+    /// mustn't close a switcher opened right after.
+    private var lastFocusAt: CFTimeInterval = 0
     /// How many cards to refresh on show; the rest keep their cached image.
     private let refreshLimit = 30
 
@@ -57,12 +62,15 @@ final class SwitcherCoordinator {
         }
         window.onSearchCommand = { [weak self] input in
             guard let self else { return }
+            if case .arrow = input { syncColumns() }
             apply(state.handle(input, optionDown: false, from: .panel).effects)
+            syncKeyNeeds()
         }
         window.onClickOutside = { [weak self] in
             guard let self else { return }
             apply(state.dismiss())
         }
+        holdMonitor.tapHotkey = Settings.tapHotkey
         hotkey.onPress = { [weak self] time in
             guard let self, !paused else { return }
             pendingShow = (.tap, time)
@@ -71,19 +79,20 @@ final class SwitcherCoordinator {
         holdMonitor.onKey = { [weak self] input, optionDown in
             guard let self else { return false }
             let wasHidden = state.phase == .hidden
+            if case .arrow = input { syncColumns() }
             let (swallow, effects) = state.handle(input, optionDown: optionDown, from: .eventTap)
             if !effects.isEmpty {
                 if wasHidden { inventory.refreshSoon(reason: "hold") }
                 pendingShow = (.hold, CACurrentMediaTime())
                 apply(effects)
             }
-            holdMonitor.holding = state.phase == .holdPending || state.phase == .holding
+            syncKeyNeeds()
             return swallow
         }
         holdMonitor.onOptionReleased = { [weak self] in
             guard let self else { return }
             apply(state.optionReleased())
-            holdMonitor.holding = false
+            syncKeyNeeds()
         }
         holdMonitor.logsRawEvents = Settings.debugKeyLog
         inventory.onChange = { [weak self] snapshot in
@@ -101,8 +110,9 @@ final class SwitcherCoordinator {
         for name in [NSWorkspace.didActivateApplicationNotification, NSWorkspace.activeSpaceDidChangeNotification] {
             workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    guard let self, self.state.isVisible else { return }
+                    guard let self, self.state.isVisible, CACurrentMediaTime() - self.lastFocusAt > 1 else { return }
                     self.apply(self.state.dismiss())
+                    self.syncKeyNeeds()
                 }
             }
         }
@@ -155,6 +165,12 @@ final class SwitcherCoordinator {
                 showWork?.cancel()
                 let work = DispatchWorkItem { [weak self] in
                     guard let self else { return }
+                    // A safety net: if ⌥ is already up, the release was missed. Switch, don't show.
+                    if !HoldMonitor.optionIsDown {
+                        apply(state.optionReleased())
+                        syncKeyNeeds()
+                        return
+                    }
                     pendingShow = (.hold, CACurrentMediaTime())
                     apply(state.showDelayElapsed())
                 }
@@ -167,10 +183,13 @@ final class SwitcherCoordinator {
                 show()
             case .hide:
                 window.hide()
-                Task { await snapshots.cancelAll() }
+                previewGeneration += 1
+                let generation = previewGeneration
+                Task { await snapshots.cancelAll(generation: generation) }
             case .focus(let id):
                 guard let info = inventory.snapshot.windows.first(where: { $0.id == id }) else { break }
                 let left = inventory.snapshot.focusedID.flatMap { leftID in inventory.snapshot.windows.first { $0.id == leftID } }
+                lastFocusAt = CACurrentMediaTime()
                 focuser.focus(info)
                 if let left, left.id != id { captureAfterSwitch(left) }
             case .selectionChanged:
@@ -187,17 +206,21 @@ final class SwitcherCoordinator {
                 window.clearSearchText()
             }
         }
+        syncKeyNeeds()
     }
 
     private func show() {
         let event = pendingShow ?? (.tap, CACurrentMediaTime())
         pendingShow = nil
-        let screen = targetScreen()
+        guard let screen = targetScreen() else { return }
         window.show(model(), on: screen, kind: event.kind, eventTime: event.eventTime,
                     reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
-        // After the panel is committed, so these never delay the first frame.
-        holdMonitor.ensureEnabled()
-        onWillShow?()
+        // After the panel is committed, and off the event tap's callback, so these never
+        // delay the first frame or a keystroke.
+        DispatchQueue.main.async { [weak self] in
+            self?.holdMonitor.ensureEnabled()
+            self?.onWillShow?()
+        }
         inventory.refreshSoon(reason: "show")
         refreshPreviews()
     }
@@ -210,14 +233,19 @@ final class SwitcherCoordinator {
         let ids = PreviewRefresh.order(visible: Array(state.items.prefix(refreshLimit)), selected: state.selectedID,
                                        storedAt: { [previews] in previews.storedAt($0) }, now: now)
         let sizes = Dictionary(inventory.snapshot.windows.map { ($0.id, $0.frame.size) }, uniquingKeysWith: { a, _ in a })
-        Task { await snapshots.request(ids, sizes: sizes) }
+        previewGeneration += 1
+        let generation = previewGeneration
+        Task { await snapshots.request(ids, sizes: sizes, generation: generation) }
     }
 
     /// The window just left is what the owner last saw; capture it once it's behind.
     private func captureAfterSwitch(_ window: WindowInfo) {
         guard SnapshotService.isAllowed else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [snapshots] in
-            Task { await snapshots.requestOne(window.id, size: window.frame.size) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self, !state.isVisible else { return }
+            previewGeneration += 1
+            let generation = previewGeneration
+            Task { await self.snapshots.requestOne(window.id, size: window.frame.size, generation: generation) }
         }
     }
 
@@ -235,13 +263,26 @@ final class SwitcherCoordinator {
     }
 
     /// The display with the focused window (§6.10), else the one with the pointer.
-    private func targetScreen() -> NSScreen {
+    private func targetScreen() -> NSScreen? {
         let snapshot = inventory.snapshot
         if let id = snapshot.focusedID, let w = snapshot.windows.first(where: { $0.id == id }), w.isOnScreen,
            let screen = NotchGeometry.screen(containingAXRect: w.frame) {
             return screen
         }
-        return NotchGeometry.screenWithPointer() ?? NSScreen.screens[0]
+        return NotchGeometry.screenWithPointer() ?? NSScreen.screens.first
+    }
+
+    /// Keeps ▲ ▼ moving by a row of the grid the owner sees.
+    private func syncColumns() {
+        guard let screen = targetScreen() else { return }
+        state.columns = window.columns(forCount: state.items.count, showsSearchBar: state.isSearching, on: screen)
+    }
+
+    /// Tells the tap what the switcher needs: all keys during a hold, characters whenever it
+    /// isn't hidden.
+    private func syncKeyNeeds() {
+        holdMonitor.holding = state.phase == .holdPending || state.phase == .holding
+        holdMonitor.wantsCharacters = state.phase != .hidden
     }
 
     private func model() -> SwitcherModel {

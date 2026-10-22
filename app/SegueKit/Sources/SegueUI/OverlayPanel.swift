@@ -137,9 +137,25 @@ public final class SwitcherWindowController {
         outsideMonitor = nil
         content.searchField.setText("")
         panel.makeFirstResponder(nil)
-        if panel.isKeyWindow { panel.resignKey() }
+        let wasKey = panel.isKeyWindow
         stopFade()
-        keepsPanelOnScreen ? park() : panel.orderOut(nil)
+        if keepsPanelOnScreen && !wasKey {
+            park()
+        } else {
+            // Ordering out is what gives the keyboard back to the app in front; a parked panel
+            // that stayed key would keep receiving typing.
+            panel.orderOut(nil)
+            if keepsPanelOnScreen {
+                DispatchQueue.main.async { [self] in if !isShowing { park() } }
+            }
+        }
+    }
+
+    /// Columns the grid would have for `count` cards on `screen`, for ▲ ▼ before a layout.
+    public func columns(forCount count: Int, showsSearchBar: Bool, on screen: NSScreen) -> Int {
+        let anchor = NotchGeometry.anchor(on: screen)
+        return SwitcherContentView.grid(count: count, screen: screen.frame, visible: screen.visibleFrame, anchor: anchor.rect,
+                                        showsSearchBar: showsSearchBar).columns
     }
 
     /// Ends a fade-in still running, so it can't make a hidden or parked panel visible again.

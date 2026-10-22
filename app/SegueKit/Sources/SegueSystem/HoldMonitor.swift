@@ -24,6 +24,12 @@ public final class HoldMonitor {
     public var paused = false
     /// Whether the switcher currently wants all keys (during a hold), for the raw log.
     public var holding = false
+    /// Whether to decode characters (for search). Off while the switcher is hidden, so
+    /// ordinary typing costs only a key-code check.
+    public var wantsCharacters = false
+    /// The tap-mode hotkey, recognized here during a hold (the tap swallows keys before the
+    /// hotkey could fire).
+    public var tapHotkey: HotkeySpec?
 
     public private(set) var isInstalled = false
     public private(set) var disabledCount = 0
@@ -69,7 +75,23 @@ public final class HoldMonitor {
         CGEvent.tapEnable(tap: tap, enable: true)
         disabledCount += 1
         Log.keys.error("event tap was off; re-enabled")
+        resyncOption()
         return true
+    }
+
+    /// Whether ⌥ is down right now, from the session's combined state rather than the events
+    /// this tap happened to see.
+    public static var optionIsDown: Bool {
+        CGEventSource.flagsState(.combinedSessionState).contains(.maskAlternate)
+    }
+
+    /// While the tap was off it may have missed ⌥ being released; catch up.
+    public func resyncOption() {
+        if optionDown && !Self.optionIsDown {
+            optionDown = false
+            Log.keys.info("⌥ was released while the tap was off")
+            onOptionReleased?()
+        }
     }
 
     public func uninstall() {
@@ -85,6 +107,7 @@ public final class HoldMonitor {
             disabledCount += 1
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             Log.keys.error("event tap disabled (\(type == .tapDisabledByTimeout ? "timeout" : "user input", privacy: .public)); re-enabled")
+            resyncOption()
             return false
         }
         let flags = event.flags
@@ -100,12 +123,19 @@ public final class HoldMonitor {
             return false
         }
         guard type == .keyDown else { return false }
+        // A key-down without ⌥ while it was down: the release was missed or a remapper posted
+        // a key with its own flags. Treat it as the release, so a hold can never get stuck.
+        if optionDown && !option {
+            optionDown = false
+            onOptionReleased?()
+        }
         optionDown = option
-        let input = Self.input(keyCode: keyCode, flags: flags, event: event)
+        let input = Self.input(keyCode: keyCode, flags: flags, event: event, tapHotkey: tapHotkey, decodeCharacters: wantsCharacters)
         return onKey?(input, option) ?? false
     }
 
-    static func input(keyCode: Int, flags: CGEventFlags, event: CGEvent) -> KeyInput {
+    static func input(keyCode: Int, flags: CGEventFlags, event: CGEvent, tapHotkey: HotkeySpec?, decodeCharacters: Bool) -> KeyInput {
+        if let tapHotkey, UInt32(keyCode) == tapHotkey.keyCode, modifiers(flags) == tapHotkey.modifiers { return .tapHotkey }
         switch keyCode {
         case kVK_Tab:
             // ⌘ or ⌃ with Tab belongs to other shortcuts (Cmd-Tab, Ctrl-Tab).
@@ -119,7 +149,7 @@ public final class HoldMonitor {
         case kVK_Return, kVK_ANSI_KeypadEnter: return .enter
         case kVK_Space: return .other
         default:
-            if flags.contains(.maskCommand) || flags.contains(.maskControl) { return .other }
+            if flags.contains(.maskCommand) || flags.contains(.maskControl) || !decodeCharacters { return .other }
             // charactersIgnoringModifiers drops ⌥'s effect (⌥ A → "a") but keeps Shift.
             guard let text = NSEvent(cgEvent: event)?.charactersIgnoringModifiers, let scalar = text.unicodeScalars.first,
                   text.unicodeScalars.count == 1, !CharacterSet.controlCharacters.contains(scalar),
@@ -127,6 +157,15 @@ public final class HoldMonitor {
             else { return .other }
             return .character(text)
         }
+    }
+
+    private static func modifiers(_ flags: CGEventFlags) -> Set<HotkeySpec.Modifier> {
+        var set: Set<HotkeySpec.Modifier> = []
+        if flags.contains(.maskControl) { set.insert(.control) }
+        if flags.contains(.maskAlternate) { set.insert(.option) }
+        if flags.contains(.maskShift) { set.insert(.shift) }
+        if flags.contains(.maskCommand) { set.insert(.command) }
+        return set
     }
 
     private func logRaw(type: CGEventType, keyCode: Int, event: CGEvent) {
