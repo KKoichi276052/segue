@@ -8,11 +8,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let menuBar = MenuBarController()
     private var permissionsWindow: PermissionsWindowController?
     private var permissions = PermissionsCoordinator.current()
+    private let privateAPI = PrivateAPI.availability
+    private lazy var report = ReportWindow()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.app.info("Segue \(SegueVersion.string, privacy: .public) launched; \(PermissionsCoordinator.describe(self.permissions), privacy: .public)")
         menuBar.willOpen = { [weak self] in self?.refreshPermissions() }
         menuBar.mainItems = { [weak self] in self?.mainMenuItems() ?? [] }
+        menuBar.debugItems = { [weak self] in self?.debugMenuItems() ?? [] }
+        for check in PrivateAPI.selfCheck() {
+            Log.app.info("self-check \(check.ok ? "ok" : "MISSING", privacy: .public) \(check.name, privacy: .public): \(check.detail, privacy: .public)")
+        }
         refreshMenu()
         if PermissionsFlow.step(for: permissions, screenRecordingSkipped: Settings.screenRecordingSkipped) != .done {
             showPermissions()
@@ -49,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func refreshMenu() {
         var state = MenuState()
         state.warnings = PermissionsFlow.warnings(for: permissions, macOSMajor: PermissionsCoordinator.macOSMajor)
+        state.notes = privateAPI.fallbackNotes
         menuBar.update(state)
     }
 
@@ -58,5 +65,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             items.append(.init("Permissions…") { [weak self] in self?.showPermissions() })
         }
         return items
+    }
+
+    private func debugMenuItems() -> [MenuBarController.Item] {
+        [
+            .init("Private API self-check") { [weak self] in
+                let text = PrivateAPI.selfCheck().map { "[\($0.ok ? "ok" : "MISSING")] \($0.name): \($0.detail)" }.joined(separator: "\n")
+                self?.report.show(title: "Private API self-check", text: text)
+            },
+        ]
     }
 }

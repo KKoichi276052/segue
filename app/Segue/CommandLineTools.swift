@@ -18,11 +18,20 @@ enum CommandLineTools {
             print(PermissionsCoordinator.describe(PermissionsCoordinator.current()))
             return 0
         }
+        if args.contains("--self-check") {
+            var allOK = true
+            for check in PrivateAPI.selfCheck() {
+                allOK = allOK && check.ok
+                print("[\(check.ok ? "ok" : "MISSING")] \(check.name): \(check.detail)")
+            }
+            return allOK ? 0 : 1
+        }
         if args.contains("--help") {
             print("""
             Segue \(SegueVersion.string)
               --version        print the version
               --permissions    print which permissions this process has
+              --self-check     check the private calls Segue uses (no side effects)
               --help           this help
             """)
             return 0
