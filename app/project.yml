@@ -1,0 +1,56 @@
+# XcodeGen spec for the Segue app (docs/SPEC.md §9 "Project structure").
+# Generate the project with `xcodegen generate` in this directory; Segue.xcodeproj is ignored by git.
+name: Segue
+options:
+  bundleIdPrefix: io.github.kkoichi276052
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+configFiles:
+  Debug: Segue.xcconfig
+  Release: Segue.xcconfig
+packages:
+  SegueKit:
+    path: SegueKit
+targets:
+  Segue:
+    type: application
+    platform: macOS
+    sources:
+      - path: Segue
+    dependencies:
+      - package: SegueKit
+        product: SegueCore
+      - package: SegueKit
+        product: SegueSystem
+      - package: SegueKit
+        product: SegueUI
+    info:
+      path: Segue/Info.plist
+      properties:
+        CFBundleDisplayName: Segue
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSApplicationCategoryType: public.app-category.productivity
+        LSUIElement: true
+        NSHumanReadableCopyright: ""
+    entitlements:
+      path: Segue/Segue.entitlements
+      properties: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.kkoichi276052.segue
+        PRODUCT_NAME: Segue
+        SWIFT_VERSION: "6.0"
+        ENABLE_HARDENED_RUNTIME: YES
+        GENERATE_INFOPLIST_FILE: NO
+        COMBINE_HIDPI_IMAGES: YES
+schemes:
+  Segue:
+    build:
+      targets:
+        Segue: all
+    run:
+      config: Debug
+    test:
+      config: Debug

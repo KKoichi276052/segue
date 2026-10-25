@@ -1,0 +1,71 @@
+import Darwin
+import Foundation
+
+// Timing helpers, adapted from spikes/Sources/SpikeKit/Measure.swift.
+
+/// Runs `body` and returns its result with the elapsed time in milliseconds.
+public func measure<T>(_ body: () throws -> T) rethrows -> (T, Double) {
+    let start = ContinuousClock.now
+    let value = try body()
+    return (value, (ContinuousClock.now - start).milliseconds)
+}
+
+extension Duration {
+    public var milliseconds: Double {
+        let (s, attos) = components
+        return Double(s) * 1_000 + Double(attos) / 1e15
+    }
+}
+
+/// Summary statistics for a set of millisecond samples.
+public struct Stats: Equatable, Sendable {
+    public let count: Int
+    public let min: Double
+    public let median: Double
+    public let p95: Double
+    public let max: Double
+
+    public init?(_ samples: [Double]) {
+        guard !samples.isEmpty else { return nil }
+        let sorted = samples.sorted()
+        count = sorted.count
+        min = sorted.first!
+        max = sorted.last!
+        median = sorted[sorted.count / 2]
+        p95 = sorted[Swift.min(sorted.count - 1, Int((Double(sorted.count) * 0.95).rounded(.up)) - 1)]
+    }
+
+    public var summary: String {
+        "n=\(count) min \(fmt(min)) · median \(fmt(median)) · p95 \(fmt(p95)) · max \(fmt(max)) ms"
+    }
+}
+
+public func fmt(_ value: Double, _ digits: Int = 1) -> String {
+    String(format: "%.\(digits)f", value)
+}
+
+/// Resident memory of this process in bytes.
+public func residentMemory() -> UInt64 {
+    var info = mach_task_basic_info()
+    var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size)
+    let result = withUnsafeMutablePointer(to: &info) {
+        $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+            task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+        }
+    }
+    return result == KERN_SUCCESS ? info.resident_size : 0
+}
+
+/// This process's physical footprint in bytes: what Activity Monitor shows as Memory, and
+/// what the 100 MB target (docs/SPEC.md §8) means. Resident size also counts shared system
+/// frameworks.
+public func physicalFootprint() -> UInt64 {
+    var info = task_vm_info_data_t()
+    var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+    let result = withUnsafeMutablePointer(to: &info) {
+        $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+            task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+        }
+    }
+    return result == KERN_SUCCESS ? info.phys_footprint : 0
+}
