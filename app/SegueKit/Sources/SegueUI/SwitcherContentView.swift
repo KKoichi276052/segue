@@ -152,10 +152,17 @@ public final class SwitcherContentView: NSView {
                              userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])
     }
 
+    /// Segue is never the active app, so without this the first click on a card would only
+    /// make the panel key instead of reaching `mouseDown`.
+    public override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     public override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         if let hit = visibleFrames.first(where: { $0.frame.contains(point) }) {
+            Log.ui.info("click on card \(hit.index)")
             onChoose?(hit.index)
+        } else {
+            Log.ui.info("click at \(Int(point.x)),\(Int(point.y)) missed every card")
         }
     }
 }

@@ -216,7 +216,10 @@ public final class SwitcherWindowController {
     private func installOutsideMonitor() {
         guard outsideMonitor == nil else { return }
         outsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            MainActor.assumeIsolated { self?.onClickOutside?() }
+            MainActor.assumeIsolated {
+                Log.ui.info("click outside the switcher")
+                self?.onClickOutside?()
+            }
         }
     }
 }
