@@ -190,12 +190,21 @@ final class SwitcherCoordinator {
                 guard let info = inventory.snapshot.windows.first(where: { $0.id == id }) else { break }
                 let left = inventory.snapshot.focusedID.flatMap { leftID in inventory.snapshot.windows.first { $0.id == leftID } }
                 lastFocusAt = CACurrentMediaTime()
-                focuser.focus(info)
+                // Focus once the panel is gone. Ordering out a panel that had the keyboard
+                // hands it back to the app that was in front, which would pull macOS back
+                // to the current Space after SkyLight had switched to the target's.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+                    guard let self else { return }
+                    focuser.focus(info)
+                    reportFocus(info)
+                }
                 if let left, left.id != id { captureAfterSwitch(left) }
             case .selectionChanged:
                 window.update(model())
             case .takeKeyboard:
-                window.takeKeyboard()
+                // After the show is committed: becoming key takes a window-server round trip
+                // that would otherwise delay the first frame.
+                DispatchQueue.main.async { [weak self] in self?.window.takeKeyboard() }
             case .beginSearch(let text):
                 window.takeKeyboard(text: text)
             case .appendSearch(let text):
@@ -236,6 +245,22 @@ final class SwitcherCoordinator {
         previewGeneration += 1
         let generation = previewGeneration
         Task { await snapshots.request(ids, sizes: sizes, generation: generation) }
+    }
+
+    /// Logs what ended up in front shortly after a switch, to diagnose switches that land
+    /// somewhere else (for example on another Space).
+    private func reportFocus(_ target: WindowInfo) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self else { return }
+            let front = NSWorkspace.shared.frontmostApplication
+            let focused = inventory.snapshot.focusedID
+            let ok = front?.processIdentifier == target.pid && focused == target.id
+            Log.focus.info("""
+                after switch to \(target.id) (\(target.appName, privacy: .public), \(target.kind.rawValue, privacy: .public)): \
+                front is \(front?.localizedName ?? "none", privacy: .public), focused window \(focused.map(String.init) ?? "none", privacy: .public) \
+                [\(ok ? "ok" : "MISSED", privacy: .public)]
+                """)
+        }
     }
 
     /// The window just left is what the owner last saw; capture it once it's behind.
