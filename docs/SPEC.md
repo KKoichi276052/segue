@@ -428,18 +428,19 @@ Before starting on the Mac: install Xcode (or Command Line Tools with Swift 6), 
 
 ### M1 findings
 
-**Status (2026-10-23).** The M1 app is built ([`app/`](../app/)): all ten steps of the [M1 plan](#m1-plan-decided), 68 unit tests passing, with clean Debug and Release builds on the same MacBook and macOS 27.0.1. The checks below were run by the agent with command-line options that don't install the event tap, move windows or capture the screen. Everything that needs real keys, Spaces or captures is in the owner's [hands-on checklist](../app/M1-CHECKLIST.md) and still open, so M1 isn't done yet.
+**Status (2026-10-29): M1 closed, with known issues.** The app is built ([`app/`](../app/)), 73 unit tests pass, and the owner checked it hands-on on macOS 27.0.1. The owner chose to close M1 and start M2, and to handle the known issues when they get in the way, rather than finish every check first.
 
-| Target | Result so far | Status |
+| Target | Result | Status |
 |---|---|---|
-| Hotkey to first frame within 16 ms median, including the first show | Not measured: needs real key presses (Debug › Timing summary) | Open |
-| About 0% CPU while hidden | 0.0% idle with input off (Release). `--watch-windows 60`: 0.095% while tracking focus changes. | Met so far; the 10-minute idle check with input on is open |
-| 100 MB or less with previews | 19.6 MB physical footprint idle, Release, no previews yet | Open: needs 20 or more captured images |
-| Focus works for all four kinds of window | Current Space: focus confirmed 65.7 ms after the request, through SkyLight (the window was already in front) | Open: other Space, hidden app and minimized |
-| Window list | Built in 7.8–16.6 ms warm (two runs). Reading it on the main thread: 0.0001 ms. | Met |
-| Search keystroke within 16 ms for 100 windows | Ranking, reordering and laying out the grid's layers: median 0.1 ms, max 0.7 ms; 300 windows: max 2.8 ms (`--bench-search`). The window server's compositing isn't included. | Met |
-| Private calls | All resolve on 27.0.1. With SkyLight disabled by a debug default, the fallback note shows. | Met |
-| Card grid | Offscreen renders with 6, 16 and 89 cards, Japanese titles and a filtered search lay out as intended | Met offscreen; on screen open |
+| Hotkey to first frame within 16 ms median | ⌥ Space median 54.6 ms, hold median 29.2 ms, first show 69.2 ms. Segue's own work is 3–10 ms; 24–50 ms pass between handing the panel to macOS and the first display-link callback. Each show logs its steps (`show steps` in the `ui` log) for when it matters. | Known issue; the owner doesn't notice lag |
+| About 0% CPU while hidden | 0.0% idle with input off; 0.095% while tracking focus changes | Met; 10-minute check with input on not run |
+| 100 MB or less with previews | 27 MB physical footprint with 12 previews | Met |
+| Focus works for all four kinds of window | Current Space, other Space (after the Space move below), click and keyboard all work | Met; hidden app and minimized not checked separately |
+| Window list | 7.8–16.6 ms warm; reading it on the main thread 0.0001 ms | Met |
+| Search keystroke within 16 ms for 100 windows | median 0.1 ms, max 0.7 ms offscreen | Met |
+| Hands-on | Hold, quick switch, cancel, ⇧ Tab and arrows; ⌥ Space; search in English, Japanese and full width; esc; full-screen apps; the external display's virtual notch; clicking cards and outside; Pause; previews (22.6 ms per capture, none blank); many windows shrink the cards | Met |
+
+**Not tested, by choice:** freezing apps (`kill -STOP`), the kanata key log, VoiceOver, running without Screen Recording, launch at login, sleep, and paging (reached only beyond about 45–50 windows).
 
 Notes:
 
@@ -448,14 +449,16 @@ Notes:
 - **Typing during a hold.** Letters typed while ⌥ is still held come through the event tap and skip the input method. Once ⌥ is released, typing goes into the search field and input methods work.
 - **Signing.** Ad-hoc builds lose their permissions on every rebuild, so permission checks need a build signed with the owner's Apple Development certificate (`app/Local.xcconfig`).
 - **Command-line checks.** An option the binary doesn't know now prints an error and exits. Before this change, a stale build given a new check option started the full app from the terminal for about 10 minutes, which registers the hotkey and can install the event tap.
-- **Still to record:** what kanata sends when a stray Shift appears, which System Settings panes list Segue, whether macOS 27 shows a recording indicator during captures, and a week of daily use.
+- **Other Spaces on macOS 27.** SkyLight brings the window's app forward but doesn't switch Space. Segue now presses "Move left/right a space" first and waits for it (about 1 s of macOS animation), which needs those shortcuts on. See the [decision log](#15-decision-log).
+- **Cards on click.** Clicking a card didn't switch until the card view accepted the first click (`acceptsFirstMouse`).
+- **Permissions on macOS 27.** Segue is listed under Device Control and Data Access and under Screen & System Audio Recording, not under Input Monitoring, and the event tap works.
 
 ## 11. Milestones
 
 | Milestone | Scope |
 |---|---|
 | M0 | Spikes S1, S2, S4, S6 (S3 and S5 can follow). Done 2026-10-22; results in [§10](#m0-spike-plan-proposed). |
-| M1 | Window switcher: hold mode across all windows, search, previews, no workspaces yet. The owner uses it daily. See the [M1 plan](#m1-plan-decided). Built 2026-10-23; the owner's hands-on checks are open ([findings](#m1-findings)). |
+| M1 | Window switcher: hold mode across all windows, search, previews, no workspaces yet. The owner uses it daily. See the [M1 plan](#m1-plan-decided). Built 2026-10-23, closed 2026-10-29 with known issues ([findings](#m1-findings)). |
 | M2 | Workspaces: ring, preview, save and bring back, launch missing apps |
 | M3 | Window actions: snap, send, close; loose windows |
 | M4 | Polish: motion, side glances, peek islands, virtual notch, settings, onboarding |
