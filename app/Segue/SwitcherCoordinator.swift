@@ -190,13 +190,21 @@ final class SwitcherCoordinator {
                 guard let info = inventory.snapshot.windows.first(where: { $0.id == id }) else { break }
                 let left = inventory.snapshot.focusedID.flatMap { leftID in inventory.snapshot.windows.first { $0.id == leftID } }
                 lastFocusAt = CACurrentMediaTime()
-                // Focus once the panel is gone. Ordering out a panel that had the keyboard
-                // hands it back to the app that was in front, which would pull macOS back
-                // to the current Space after SkyLight had switched to the target's.
+                // Focus once the panel is gone, so the keyboard handed back to the previous
+                // app when a key panel orders out can't land after the switch. On macOS 27
+                // SkyLight no longer switches Space, so move to the window's Space first.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
                     guard let self else { return }
-                    focuser.focus(info)
-                    reportFocus(info)
+                    let focus: @MainActor @Sendable (SpaceSwitcher.Result) -> Void = { [weak self] space in
+                        guard let self else { return }
+                        focuser.focus(info)
+                        reportFocus(info, space: space)
+                    }
+                    if info.kind == .otherSpace {
+                        SpaceSwitcher.moveToSpace(of: info.id, completion: focus)
+                    } else {
+                        focus(.notNeeded)
+                    }
                 }
                 if let left, left.id != id { captureAfterSwitch(left) }
             case .selectionChanged:
@@ -249,16 +257,19 @@ final class SwitcherCoordinator {
 
     /// Logs what ended up in front shortly after a switch, to diagnose switches that land
     /// somewhere else (for example on another Space).
-    private func reportFocus(_ target: WindowInfo) {
+    private func reportFocus(_ target: WindowInfo, space: SpaceSwitcher.Result) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             guard let self else { return }
             let front = NSWorkspace.shared.frontmostApplication
             let focused = inventory.snapshot.focusedID
-            let ok = front?.processIdentifier == target.pid && focused == target.id
-            Log.focus.info("""
+            let showing = SpaceRoute.compute(windowSpaces: PrivateAPI.spaces(ofWindow: target.id) ?? [],
+                                             displays: PrivateAPI.displaySpaces() ?? []) == nil
+            let ok = front?.processIdentifier == target.pid && focused == target.id && showing
+            Log.focus.notice("""
                 after switch to \(target.id) (\(target.appName, privacy: .public), \(target.kind.rawValue, privacy: .public)): \
-                front is \(front?.localizedName ?? "none", privacy: .public), focused window \(focused.map(String.init) ?? "none", privacy: .public) \
-                [\(ok ? "ok" : "MISSED", privacy: .public)]
+                \(space.description, privacy: .public); front is \(front?.localizedName ?? "none", privacy: .public), \
+                focused window \(focused.map(String.init) ?? "none", privacy: .public), \
+                its Space \(showing ? "showing" : "not showing", privacy: .public) [\(ok ? "ok" : "MISSED", privacy: .public)]
                 """)
         }
     }

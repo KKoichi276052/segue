@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import Darwin
+import SegueCore
 
 // The private calls Segue accepts (docs/SPEC.md §9 "Private APIs"), adapted from
 // spikes/Sources/SpikeKit/Windows.swift and Focus.swift. Every symbol is resolved at run
@@ -76,6 +77,37 @@ public enum PrivateAPI {
         return true
     }
 
+    // MARK: Spaces (read only)
+
+    private typealias MainConnectionID = @convention(c) () -> Int32
+    private typealias CopyManagedDisplaySpaces = @convention(c) (Int32) -> Unmanaged<CFArray>?
+    private typealias CopySpacesForWindows = @convention(c) (Int32, Int32, CFArray) -> Unmanaged<CFArray>?
+
+    private static let mainConnectionID = symbol(skyLight, "SLSMainConnectionID", as: MainConnectionID.self)
+    private static let copyManagedDisplaySpaces = symbol(skyLight, "SLSCopyManagedDisplaySpaces", as: CopyManagedDisplaySpaces.self)
+    private static let copySpacesForWindows = symbol(skyLight, "SLSCopySpacesForWindows", as: CopySpacesForWindows.self)
+
+    /// Every display's Spaces in Mission Control's order, or nil if the calls are unavailable.
+    public static func displaySpaces() -> [SpaceRoute.Display]? {
+        guard let mainConnectionID, let copyManagedDisplaySpaces,
+              let list = copyManagedDisplaySpaces(mainConnectionID())?.takeRetainedValue() as? [[String: Any]]
+        else { return nil }
+        func id(_ space: Any?) -> UInt64? { ((space as? [String: Any])?["ManagedSpaceID"] as? NSNumber)?.uint64Value }
+        return list.compactMap { display in
+            guard let current = id(display["Current Space"]) else { return nil }
+            let spaces = (display["Spaces"] as? [Any] ?? []).compactMap(id)
+            return SpaceRoute.Display(id: display["Display Identifier"] as? String ?? "?", current: current, spaces: spaces)
+        }
+    }
+
+    /// The Spaces a window is on (several when it's on every Space), or nil if unavailable.
+    public static func spaces(ofWindow windowID: CGWindowID) -> [UInt64]? {
+        guard let mainConnectionID, let copySpacesForWindows else { return nil }
+        let allSpaces: Int32 = 0x7
+        let ids = copySpacesForWindows(mainConnectionID(), allSpaces, [NSNumber(value: windowID)] as CFArray)?.takeRetainedValue()
+        return (ids as? [NSNumber])?.map(\.uint64Value) ?? []
+    }
+
     // MARK: Self-check
 
     /// Resolves every call and, where it can without side effects, tries it. Focus isn't
@@ -100,6 +132,10 @@ public enum PrivateAPI {
         results.append(("_SLPSSetFrontProcessWithOptions", setFrontProcess != nil, setFrontProcess != nil ? "resolved" : "missing"))
         results.append(("SLPSPostEventRecordTo", postEventRecord != nil, postEventRecord != nil ? "resolved" : "missing"))
         results.append(("GetProcessForPID", getProcessForPID != nil, getProcessForPID != nil ? "resolved" : "missing"))
+        let spaces = displaySpaces()
+        results.append(("SLSCopyManagedDisplaySpaces", spaces != nil,
+                        spaces.map { "\($0.count) displays, \($0.map { "\($0.spaces.count) Spaces" }.joined(separator: " and "))" } ?? "missing"))
+        results.append(("SLSCopySpacesForWindows", copySpacesForWindows != nil, copySpacesForWindows != nil ? "resolved" : "missing"))
         return results
     }
 
