@@ -41,8 +41,22 @@ func document(of window: AXWindow) -> String? {
     return value
 }
 
+/// Standard windows on this Space, minimized ones included (restoring unminimizes them).
 func standardWindows(of app: NSRunningApplication) -> [AXWindow] {
-    WindowList.axWindows(of: app).filter { !$0.isMinimized && $0.subrole == "AXStandardWindow" }
+    WindowList.axWindows(of: app).filter { $0.subrole == "AXStandardWindow" }
+}
+
+/// Accessibility can't see windows on other Spaces; the Window Server can, with titles
+/// when Screen Recording is granted.
+func elsewhere(_ slot: Slot) -> Bool {
+    let pids = Set(NSRunningApplication.runningApplications(withBundleIdentifier: slot.bundleID).map(\.processIdentifier))
+    return WindowList.cgWindows().contains { pids.contains($0.pid) && !$0.isOnScreen && $0.title == slot.title }
+}
+
+/// The document's file, when it exists on this Mac (a remote project's path doesn't).
+func localDocument(_ slot: Slot) -> URL? {
+    guard let d = slot.document, let url = URL(string: d), url.isFileURL, FileManager.default.fileExists(atPath: url.path) else { return nil }
+    return url
 }
 
 func currentSlots() -> [Slot] {
@@ -123,7 +137,11 @@ func printMatches(_ matches: [Match]) -> Int {
     for m in matches {
         let ok = isCorrect(m)
         if ok { correct += 1 }
-        let got = m.window.map { "“\($0.title.prefix(40))”" } ?? "no window"
+        var got = m.window.map { "“\($0.title.prefix(40))”\($0.isMinimized ? " (minimized)" : "")" } ?? "no window"
+        if m.window == nil {
+            if elsewhere(m.slot) { got += "; it's on another desktop or minimized there" }
+            if m.slot.document != nil && localDocument(m.slot) == nil { got += "; its document isn't on this Mac (\(m.slot.document!))" }
+        }
         print("[\(ok ? "ok" : "--")] \(m.slot.appName): “\(m.slot.title.prefix(40))” → \(got) (\(m.fit))")
     }
     return correct
@@ -148,7 +166,7 @@ func waitForWindows(_ bundleID: String, count: Int, timeout: TimeInterval) -> Do
 func launch(_ slots: [Slot]) -> (ms: Double?, note: String) {
     let first = slots[0]
     let appURL = URL(fileURLWithPath: first.appPath)
-    let documents = slots.compactMap(\.document).compactMap(URL.init(string:))
+    let documents = slots.compactMap(localDocument)
     let config = NSWorkspace.OpenConfiguration()
     config.activates = false
     var error: Error?
@@ -209,7 +227,7 @@ if args.flag("inspect") {
         } else {
             // Running: reopen the documents whose windows are gone.
             let present = match(group).filter(isCorrect).map(\.slot.title)
-            let missing = group.filter { !present.contains($0.title) && $0.document != nil }
+            let missing = group.filter { !present.contains($0.title) && localDocument($0) != nil }
             if !missing.isEmpty {
                 let (ms, note) = launch(missing)
                 print("\(group[0].appName): running; reopened \(missing.count) document(s): \(note), \(ms.map { "\(fmt($0, 0)) ms" } ?? "timed out")")
@@ -221,7 +239,11 @@ if args.flag("inspect") {
     report.section("Matches")
     let matches = match(slots)
     let correct = printMatches(matches)
-    for m in matches { if let w = m.window { setFrame(w, m.slot.frame) } }
+    for m in matches {
+        guard let w = m.window else { continue }
+        if w.isMinimized { AX.setBool(w.element, kAXMinimizedAttribute, false) }
+        setFrame(w, m.slot.frame)
+    }
     RunLoop.main.run(until: Date().addingTimeInterval(0.3))
     var placed = 0
     for m in matches {
