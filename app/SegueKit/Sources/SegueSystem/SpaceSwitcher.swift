@@ -19,7 +19,7 @@ public enum SpaceSwitcher {
             switch self {
             case .notNeeded: "no Space move needed"
             case .arrived(let steps, let ms): "moved \(steps) Space\(abs(steps) == 1 ? "" : "s") in \(fmt(ms)) ms"
-            case .timedOut(let steps): "pressed the shortcut \(abs(steps))×, Space didn't change within 2 s"
+            case .timedOut(let steps): "pressed the shortcut \(abs(steps))×, Space didn't change within 2 s (are Move left/right a space on in Keyboard Shortcuts › Mission Control?)"
             case .unavailable(let why): "can't move Space: \(why)"
             }
         }

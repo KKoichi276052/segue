@@ -51,6 +51,8 @@ public final class SwitcherWindowController {
     private let content = SwitcherContentView()
     private var link: CADisplayLink?
     private var pending: (kind: ShowKind, eventTime: CFTimeInterval)?
+    /// Where a show's time went, logged with the first frame (M1 speed check).
+    private var steps: [(String, CFTimeInterval)] = []
     private var outsideMonitor: Any?
     private var currentScreen: NSScreen?
 
@@ -87,10 +89,13 @@ public final class SwitcherWindowController {
             return
         }
         isShowing = true
+        steps = [("event", eventTime), ("show called", CACurrentMediaTime())]
         layout(on: screen, model: model)
+        steps.append(("layout", CACurrentMediaTime()))
         panel.ignoresMouseEvents = false
         panel.alphaValue = 0
         panel.orderFrontRegardless()
+        steps.append(("order front", CACurrentMediaTime()))
         // Fade in over about 100 ms, so a release just after the show delay doesn't read
         // as a flash (§6.1). Hiding is instant.
         NSAnimationContext.runAnimationGroup { context in
@@ -98,6 +103,7 @@ public final class SwitcherWindowController {
             panel.animator().alphaValue = 1
         }
         CATransaction.flush()
+        steps.append(("flush", CACurrentMediaTime()))
         pending = (kind, eventTime)
         link = content.displayLink(target: self, selector: #selector(frame(_:)))
         link?.add(to: .main, forMode: .common)
@@ -210,6 +216,10 @@ public final class SwitcherWindowController {
         self.link = nil
         guard let pending else { return }
         self.pending = nil
+        steps.append(("frame callback", CACurrentMediaTime()))
+        steps.append(("frame shown", link.targetTimestamp))
+        let parts = zip(steps.dropFirst(), steps).map { "\($0.0.0) +\(fmt(($0.0.1 - $0.1.1) * 1000))" }
+        Log.ui.notice("show steps (ms): \(parts.joined(separator: ", "), privacy: .public)")
         onFirstFrame?(pending.kind, (link.targetTimestamp - pending.eventTime) * 1000)
     }
 

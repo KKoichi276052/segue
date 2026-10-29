@@ -306,6 +306,7 @@ The product uses two private calls that S1 relies on, as AltTab does:
 
 - **`_SLPSSetFrontProcessWithOptions` and `SLPSPostEventRecordTo`** (SkyLight) focus a window on another Space.
 - **`_AXUIElementGetWindow`** maps an Accessibility window to its window ID.
+- **`SLSCopySpacesForWindows` and `SLSCopyManagedDisplaySpaces`** (SkyLight, read only) tell which Space a window is on and each display's Spaces in order. Added in M1: on macOS 27 the focus call above brings the window's app forward but doesn't switch Space, so Segue presses the "Move left/right a space" shortcut first ([M1 findings](#m1-findings)).
 
 Notarization doesn't check for private APIs; App Store review does, and the App Store is already ruled out. The risk is a macOS update breaking them, so:
 
@@ -601,6 +602,7 @@ Based on product pages and general knowledge as of October 2026. Verify before u
 | 2026-10-23 | Focus goes through SkyLight on every Space, not only other Spaces, with Accessibility as the fallback ([M1 findings](#m1-findings)) | Proposed |
 | 2026-10-23 | Helper windows are filtered out: off-screen windows under 100 pt or with an empty title | Proposed |
 | 2026-10-23 | Accept for M1 that letters typed while ⌥ is still held skip the input method | Proposed |
+| 2026-10-29 | Choosing a window on another macOS Space moves there with the "Move left/right a space" shortcut, then focuses it. The macOS slide (about 1 s) is accepted for M1; instant switching is a later, standalone experiment. It needs those shortcuts on in Keyboard Shortcuts › Mission Control. | Decided |
 
 ## 16. Prototypes
 
