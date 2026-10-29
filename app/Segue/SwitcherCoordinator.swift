@@ -212,7 +212,11 @@ final class SwitcherCoordinator {
             case .takeKeyboard:
                 // After the show is committed: becoming key takes a window-server round trip
                 // that would otherwise delay the first frame.
-                DispatchQueue.main.async { [weak self] in self?.window.takeKeyboard() }
+                DispatchQueue.main.async { [weak self] in
+                    self?.window.noteStep("start take keyboard")
+                    self?.window.takeKeyboard()
+                    self?.window.noteStep("take keyboard")
+                }
             case .beginSearch(let text):
                 window.takeKeyboard(text: text)
             case .appendSearch(let text):
@@ -235,8 +239,12 @@ final class SwitcherCoordinator {
         // After the panel is committed, and off the event tap's callback, so these never
         // delay the first frame or a keystroke.
         DispatchQueue.main.async { [weak self] in
-            self?.holdMonitor.ensureEnabled()
-            self?.onWillShow?()
+            guard let self else { return }
+            window.noteStep("start tap check")
+            holdMonitor.ensureEnabled()
+            window.noteStep("tap check")
+            onWillShow?()
+            window.noteStep("permissions and menu")
         }
         inventory.refreshSoon(reason: "show")
         refreshPreviews()
@@ -287,7 +295,11 @@ final class SwitcherCoordinator {
 
     private func received(_ image: CGImage, for id: WindowID) {
         previews.insert(image, for: id, cost: image.bytesPerRow * image.height, at: CACurrentMediaTime())
-        if window.isShowing, state.items.contains(id) { window.update(model()) }
+        if window.isShowing, state.items.contains(id) {
+            window.noteStep("start preview \(id)")
+            window.update(model())
+            window.noteStep("preview \(id)")
+        }
     }
 
     func previewSummary() async -> String {

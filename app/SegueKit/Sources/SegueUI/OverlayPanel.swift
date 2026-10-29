@@ -105,9 +105,16 @@ public final class SwitcherWindowController {
         CATransaction.flush()
         steps.append(("flush", CACurrentMediaTime()))
         pending = (kind, eventTime)
+        DispatchQueue.main.async { [weak self] in self?.noteStep("main thread free") }
         link = content.displayLink(target: self, selector: #selector(frame(_:)))
         link?.add(to: .main, forMode: .common)
         installOutsideMonitor()
+    }
+
+    /// Adds a named moment to the current show's timing log, until its first frame.
+    public func noteStep(_ name: String) {
+        guard pending != nil else { return }
+        steps.append((name, CACurrentMediaTime()))
     }
 
     /// Gives the search field the keyboard without activating Segue: the app in front stays
