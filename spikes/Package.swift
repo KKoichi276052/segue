@@ -11,6 +11,7 @@ let package = Package(
         .executableTarget(name: "s1-windows", dependencies: ["SpikeKit"]),
         .executableTarget(name: "s2-arrange", dependencies: ["SpikeKit"]),
         .executableTarget(name: "s4-capture", dependencies: ["SpikeKit"]),
+        .executableTarget(name: "s5-restore", dependencies: ["SpikeKit"]),
         .executableTarget(name: "s6-panel", dependencies: ["SpikeKit"]),
     ]
 )
