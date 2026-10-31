@@ -190,12 +190,33 @@ final class SwitcherCoordinator {
                 guard let info = inventory.snapshot.windows.first(where: { $0.id == id }) else { break }
                 let left = inventory.snapshot.focusedID.flatMap { leftID in inventory.snapshot.windows.first { $0.id == leftID } }
                 lastFocusAt = CACurrentMediaTime()
-                focuser.focus(info)
+                // Focus once the panel is gone, so the keyboard handed back to the previous
+                // app when a key panel orders out can't land after the switch. On macOS 27
+                // SkyLight no longer switches Space, so move to the window's Space first.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+                    guard let self else { return }
+                    let focus: @MainActor @Sendable (SpaceSwitcher.Result) -> Void = { [weak self] space in
+                        guard let self else { return }
+                        focuser.focus(info)
+                        reportFocus(info, space: space)
+                    }
+                    if info.kind == .otherSpace {
+                        SpaceSwitcher.moveToSpace(of: info.id, completion: focus)
+                    } else {
+                        focus(.notNeeded)
+                    }
+                }
                 if let left, left.id != id { captureAfterSwitch(left) }
             case .selectionChanged:
                 window.update(model())
             case .takeKeyboard:
-                window.takeKeyboard()
+                // After the show is committed: becoming key takes a window-server round trip
+                // that would otherwise delay the first frame.
+                DispatchQueue.main.async { [weak self] in
+                    self?.window.noteStep("start take keyboard")
+                    self?.window.takeKeyboard()
+                    self?.window.noteStep("take keyboard")
+                }
             case .beginSearch(let text):
                 window.takeKeyboard(text: text)
             case .appendSearch(let text):
@@ -218,8 +239,12 @@ final class SwitcherCoordinator {
         // After the panel is committed, and off the event tap's callback, so these never
         // delay the first frame or a keystroke.
         DispatchQueue.main.async { [weak self] in
-            self?.holdMonitor.ensureEnabled()
-            self?.onWillShow?()
+            guard let self else { return }
+            window.noteStep("start tap check")
+            holdMonitor.ensureEnabled()
+            window.noteStep("tap check")
+            onWillShow?()
+            window.noteStep("permissions and menu")
         }
         inventory.refreshSoon(reason: "show")
         refreshPreviews()
@@ -238,6 +263,25 @@ final class SwitcherCoordinator {
         Task { await snapshots.request(ids, sizes: sizes, generation: generation) }
     }
 
+    /// Logs what ended up in front shortly after a switch, to diagnose switches that land
+    /// somewhere else (for example on another Space).
+    private func reportFocus(_ target: WindowInfo, space: SpaceSwitcher.Result) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self else { return }
+            let front = NSWorkspace.shared.frontmostApplication
+            let focused = inventory.snapshot.focusedID
+            let showing = SpaceRoute.compute(windowSpaces: PrivateAPI.spaces(ofWindow: target.id) ?? [],
+                                             displays: PrivateAPI.displaySpaces() ?? []) == nil
+            let ok = front?.processIdentifier == target.pid && focused == target.id && showing
+            Log.focus.notice("""
+                after switch to \(target.id) (\(target.appName, privacy: .public), \(target.kind.rawValue, privacy: .public)): \
+                \(space.description, privacy: .public); front is \(front?.localizedName ?? "none", privacy: .public), \
+                focused window \(focused.map(String.init) ?? "none", privacy: .public), \
+                its Space \(showing ? "showing" : "not showing", privacy: .public) [\(ok ? "ok" : "MISSED", privacy: .public)]
+                """)
+        }
+    }
+
     /// The window just left is what the owner last saw; capture it once it's behind.
     private func captureAfterSwitch(_ window: WindowInfo) {
         guard SnapshotService.isAllowed else { return }
@@ -251,7 +295,11 @@ final class SwitcherCoordinator {
 
     private func received(_ image: CGImage, for id: WindowID) {
         previews.insert(image, for: id, cost: image.bytesPerRow * image.height, at: CACurrentMediaTime())
-        if window.isShowing, state.items.contains(id) { window.update(model()) }
+        if window.isShowing, state.items.contains(id) {
+            window.noteStep("start preview \(id)")
+            window.update(model())
+            window.noteStep("preview \(id)")
+        }
     }
 
     func previewSummary() async -> String {

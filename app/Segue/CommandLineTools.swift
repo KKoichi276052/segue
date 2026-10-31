@@ -64,7 +64,8 @@ enum CommandLineTools {
               --watch-windows <s>  keep the live list for s seconds (default 30), print
                                each change, then the CPU time used
               --focus <id>     focus one window (ids from --dump-windows) and time it.
-                               Moves focus and may switch Space.
+                               Moves focus, and for a window on another Space presses
+                               the Move left/right a space shortcut to get there.
               --render-preview <png> [--sample <n>]
                                draw the switcher offscreen into a PNG, with the real
                                window list or n made-up windows (no screen capture)
@@ -141,16 +142,29 @@ extension CommandLineTools {
             return 1
         }
         let focuser = WindowFocuser(inventory: inventory)
-        var outcome: WindowFocuser.Outcome?
+        var space: SpaceSwitcher.Result?
         let start = ContinuousClock.now
+        if window.kind == .otherSpace {
+            SpaceSwitcher.moveToSpace(of: window.id) { space = $0 }
+            while space == nil { RunLoop.main.run(until: Date().addingTimeInterval(0.005)) }
+        } else {
+            space = .notNeeded
+        }
+        var outcome: WindowFocuser.Outcome?
         focuser.focus(window) { outcome = $0 }
         while outcome == nil { RunLoop.main.run(until: Date().addingTimeInterval(0.005)) }
         let confirmed = focuser.confirmFocus(window)
         let total = (ContinuousClock.now - start).milliseconds
-        let label = "\(window.appName) (\(window.kind.rawValue)) via \(outcome!.method.rawValue)"
-        if confirmed != nil {
-            print("[ok] \(id) \(label): request \(fmt(outcome!.requestMs)) ms, focus confirmed \(fmt(total)) ms after the request")
+        let showing = SpaceRoute.compute(windowSpaces: PrivateAPI.spaces(ofWindow: window.id) ?? [],
+                                         displays: PrivateAPI.displaySpaces() ?? []) == nil
+        let label = "\(window.appName) (\(window.kind.rawValue)) via \(outcome!.method.rawValue); \(space!)"
+        if confirmed != nil && showing {
+            print("[ok] \(id) \(label): request \(fmt(outcome!.requestMs)) ms, focus confirmed \(fmt(total)) ms after the start")
             return 0
+        }
+        if confirmed != nil {
+            print("[FAIL] \(id) \(label): focused, but its Space isn't showing")
+            return 1
         }
         print("[FAIL] \(id) \(label): not the focused window within 1.5 s (request \(fmt(outcome!.requestMs)) ms)")
         return 1

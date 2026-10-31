@@ -2,7 +2,7 @@
 
 A better Cmd-Tab and window manager for macOS, driven from the keyboard. One view shows your workspaces (saved window layouts) and the windows inside them. You can get to any of them in a few keystrokes, and snap, send or close windows from the same view. The interface appears at the MacBook notch.
 
-**Status:** specification, browser prototypes, M0 spike code and results, and the M1 window switcher in [`app/`](app/). M1 is built; the owner's hands-on checks are still open.
+**Status:** specification, browser prototypes, M0 spike code and results, and the M1 window switcher in [`app/`](app/). M1 is closed with known issues; M2 (workspaces) is next.
 
 ## Contents
 
@@ -15,4 +15,4 @@ A better Cmd-Tab and window manager for macOS, driven from the keyboard. One vie
 
 ## Next step
 
-Run the hands-on checks in [`app/M1-CHECKLIST.md`](app/M1-CHECKLIST.md) on the MacBook, then use Segue instead of Cmd-Tab for a week. The results so far are in the spec's [M1 findings](docs/SPEC.md#m1-findings); what's still open goes there too, with decisions in section 15.
+Build M2, workspaces (spec [§11](docs/SPEC.md#11-milestones)), while using the M1 switcher daily. M1's results and known issues are in the spec's [M1 findings](docs/SPEC.md#m1-findings).
